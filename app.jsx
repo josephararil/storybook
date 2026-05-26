@@ -130,6 +130,7 @@ function StoryWeaverApp() {
         id: window.SW.uniqueId(window.SW.slugify(data.title), items.map(i => i.id)),
         type: 'link',
         ...data,
+        rating: 0,
         createdAt: Date.now(),
       };
       await window.SW.itemPut(newLink);
@@ -137,6 +138,7 @@ function StoryWeaverApp() {
     }
     setAddLinkOpen(false);
     setEditingLink(null);
+    navigate('/');
   };
 
   const onRate = async (id, n) => {
@@ -179,7 +181,7 @@ function StoryWeaverApp() {
 
       <div style={{ position: 'absolute', inset: 0 }}>
         {tab === 'library'  && (
-          <Library t={theme} items={items} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
+          <Library t={theme} items={items} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} onRate={onRate} />
         )}
         {tab === 'create'   && (
           <Creator t={theme} onWeave={onWeave} onAddLink={onOpenAddLink}
@@ -196,7 +198,7 @@ function StoryWeaverApp() {
       <BottomNav t={theme} tab={tab} onChange={onTabChange} />
 
       {openStory && (
-        <Reader t={theme} story={openStory} onClose={() => history.back()} onRate={onRate} onDelete={onDelete} />
+        <Reader t={theme} story={openStory} onClose={() => navigate('/')} onRate={onRate} onDelete={onDelete} />
       )}
       {isWeaving && <Weaving t={theme} error={weaveError} />}
 

@@ -1,8 +1,8 @@
 // StoryWeaver persistent store
 // Exports window.SW — must load after data.js, before cover.jsx / screens.jsx / app.jsx
 
-const TEXT_MODEL  = "gemini-2.5-flash";
-const IMAGE_MODEL = "gemini-2.5-flash-preview-04-17";
+const TEXT_MODEL  = "gemini-3.5-flash";
+const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
@@ -74,6 +74,45 @@ function saveSeedRating(id, n) {
   const r = getSeedRatings();
   r[id] = n;
   localStorage.setItem('sw_seed_ratings', JSON.stringify(r));
+}
+
+// ─── Child profile helpers ────────────────────────────────────
+function getChildName()      { return localStorage.getItem('sw_child_name') || 'Sophie'; }
+function setChildName(n)     { localStorage.setItem('sw_child_name', n); }
+function getChildBirthday()  { return localStorage.getItem('sw_child_birthday') || ''; }
+function setChildBirthday(d) { localStorage.setItem('sw_child_birthday', d); }
+
+// ─── Sample reference image helpers ──────────────────────────
+function getSampleImage()        { return localStorage.getItem('sw_sample_image'); }
+function setSampleImage(dataUrl) { localStorage.setItem('sw_sample_image', dataUrl); }
+function clearSampleImage()      { localStorage.removeItem('sw_sample_image'); }
+
+function compressImageForStorage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const MAX = 1024;
+          let w = img.naturalWidth, h = img.naturalHeight;
+          if (w > MAX || h > MAX) {
+            if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+            else       { w = Math.round(w * MAX / h); h = MAX; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          const result = canvas.toDataURL('image/webp', 0.5);
+          resolve(result.startsWith('data:image/webp') ? result : canvas.toDataURL('image/jpeg', 0.6));
+        } catch(err) { reject(err); }
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 // ─── Merge persisted items + seeds ───────────────────────────
@@ -209,7 +248,7 @@ async function textCall(form, existingIds) {
   story.palette  = Array.isArray(story.palette) && story.palette.length >= 3
     ? story.palette.slice(0, 3)
     : ['#0f172a','#312e81','#fbbf24'];
-  story.scene    = VALID_SCENES.includes(story.scene)     ? story.scene    : 'moon';
+  story.scene    = VALID_SCENES.includes(story.scene)       ? story.scene    : 'moon';
   story.category = VALID_CATEGORIES.includes(story.category) ? story.category : 'Bedtime';
   if (!Array.isArray(story.body))  story.body  = [];
   if (!Array.isArray(story.vocab)) story.vocab = [];
@@ -225,13 +264,25 @@ async function imageCall(form) {
     `${form.context}. Mood: ${toneWord}, calming night-time palette. ` +
     `Portrait orientation, no text or lettering in the image.`;
 
+  const parts = [{ text: imagePrompt }];
+
+  const sampleImage = getSampleImage();
+  if (sampleImage) {
+    const match = sampleImage.match(/^data:(image\/[^;]+);base64,(.+)$/);
+    if (match) {
+      parts.push({
+        inline_data: { mime_type: match[1], data: match[2] },
+      });
+    }
+  }
+
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: imagePrompt }] }],
+        contents: [{ role: 'user', parts }],
         generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
       }),
     }
@@ -239,9 +290,9 @@ async function imageCall(form) {
 
   if (!res.ok) throw new Error('Image generation failed.');
 
-  const data   = await res.json();
-  const parts  = data?.candidates?.[0]?.content?.parts || [];
-  const imgPart = parts.find(p => p.inlineData || p.inline_data);
+  const data    = await res.json();
+  const resParts = data?.candidates?.[0]?.content?.parts || [];
+  const imgPart  = resParts.find(p => p.inlineData || p.inline_data);
   if (!imgPart) throw new Error('No image in response.');
 
   const inlineData = imgPart.inlineData || imgPart.inline_data;
@@ -262,6 +313,8 @@ window.SW = {
   dbOpen, itemsAll, itemPut, itemDelete,
   getApiKey, setApiKey, hasApiKey, validateApiKey,
   getSeedRatings, saveSeedRating,
+  getChildName, setChildName, getChildBirthday, setChildBirthday,
+  getSampleImage, setSampleImage, clearSampleImage, compressImageForStorage,
   mergeItems, uniqueId, slugify,
   weaveStory,
 };

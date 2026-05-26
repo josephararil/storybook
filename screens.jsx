@@ -22,16 +22,22 @@ function Icon({ name, size = 22, stroke = 2 }) {
     link:     <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>,
     trash:    <><path d="M3 6h18" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /></>,
     pencil:   <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></>,
+    cake:     <><path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8" /><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1" /><path d="M2 21h20" /><path d="M7 8v2" /><path d="M12 8v2" /><path d="M17 8v2" /><path d="M7 4h.01" /><path d="M12 4h.01" /><path d="M17 4h.01" /></>,
+    image:    <><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></>,
   };
   return <svg {...props}>{paths[name]}</svg>;
 }
 
-// ─── Star rating (display only) ───────────────────────────────
-function StarRating({ value, max = 5, size = 12, color, mutedColor }) {
+// ─── Star rating ──────────────────────────────────────────────
+function StarRating({ value, max = 5, size = 12, color, mutedColor, onRate }) {
   return (
     <div style={{ display: 'inline-flex', gap: 2, color }}>
       {Array.from({ length: max }).map((_, i) => (
-        <span key={i} style={{ color: i < value ? color : mutedColor, display: 'inline-flex' }}>
+        <span
+          key={i}
+          style={{ color: i < value ? color : mutedColor, display: 'inline-flex', cursor: onRate ? 'pointer' : 'default' }}
+          onClick={onRate ? (e) => { e.stopPropagation(); onRate(i + 1); } : undefined}
+        >
           <Icon name="star" size={size} stroke={1.5} />
         </span>
       ))}
@@ -131,13 +137,18 @@ function BottomNav({ t, tab, onChange }) {
 }
 
 // ─── Library ──────────────────────────────────────────────────
-function Library({ t, items, onOpen, onDelete, onEditLink }) {
-  const [query, setQuery] = useState('');
-  const filtered = items.filter(s =>
-    !query ||
-    s.title.toLowerCase().includes(query.toLowerCase()) ||
-    (s.category && s.category.toLowerCase().includes(query.toLowerCase()))
-  );
+function Library({ t, items, onOpen, onDelete, onEditLink, onRate }) {
+  const [query,    setQuery]    = useState('');
+  const [category, setCategory] = useState('All');
+  const childName = window.SW?.getChildName() || 'Sophie';
+
+  const filtered = items.filter(s => {
+    const matchQuery = !query ||
+      s.title.toLowerCase().includes(query.toLowerCase()) ||
+      (s.category && s.category.toLowerCase().includes(query.toLowerCase()));
+    const matchCat = category === 'All' || s.category === category;
+    return matchQuery && matchCat;
+  });
 
   const search = (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center',
@@ -157,42 +168,46 @@ function Library({ t, items, onOpen, onDelete, onEditLink }) {
   return (
     <div style={{ padding: '60px 20px 130px', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
       <div style={{ marginBottom: 18 }}>
-        <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontWeight: 600, fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase' }}>For Sophie</div>
+        <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontWeight: 600, fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase' }}>For {childName}</div>
         <h1 style={{
           margin: '4px 0 0', fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
           fontSize: t.titleSize, color: t.text, letterSpacing: t.headStyle === 'italic' ? -0.5 : -0.8, lineHeight: 1.05,
         }}>
-          {t.libraryGreeting || "Tonight’s\nstories"}
+          {t.libraryGreeting || "Tonight's\nstories"}
         </h1>
       </div>
 
       {search}
 
       <div style={{ display: 'flex', gap: 8, margin: '18px 0 16px', overflowX: 'auto', paddingBottom: 4 }}>
-        {['All', 'Bedtime', 'Animals', 'Magic', 'Adventure', 'Friends'].map((c, i) => (
-          <div key={c} style={{
-            padding: '7px 14px', borderRadius: 999, flexShrink: 0,
-            background: i === 0 ? t.accent : t.glass,
-            color: i === 0 ? '#1a0a3e' : t.textMuted,
-            border: i === 0 ? 'none' : `1px solid ${t.glassBorder}`,
-            fontFamily: t.fontBody, fontWeight: 700, fontSize: 12, letterSpacing: 0.3,
-          }}>{c}</div>
-        ))}
+        {['All', 'Bedtime', 'Animals', 'Magic', 'Adventure', 'Friends'].map((c) => {
+          const active = category === c;
+          return (
+            <button key={c} onClick={() => setCategory(c)} style={{
+              padding: '7px 14px', borderRadius: 999, flexShrink: 0,
+              background: active ? t.accent : t.glass,
+              color: active ? '#1a0a3e' : t.textMuted,
+              border: active ? 'none' : `1px solid ${t.glassBorder}`,
+              fontFamily: t.fontBody, fontWeight: 700, fontSize: 12, letterSpacing: 0.3,
+              cursor: 'pointer',
+            }}>{c}</button>
+          );
+        })}
       </div>
 
       {t.layout === 'editorial' ? (
-        <EditorialGrid t={t} stories={filtered} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
+        <EditorialGrid t={t} stories={filtered} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} onRate={onRate} />
       ) : t.layout === 'pinterest' ? (
-        <PinterestGrid t={t} stories={filtered} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
+        <PinterestGrid t={t} stories={filtered} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} onRate={onRate} />
       ) : (
-        <SimpleGrid t={t} stories={filtered} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
+        <SimpleGrid t={t} stories={filtered} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} onRate={onRate} />
       )}
     </div>
   );
 }
 
 // ─── Card meta ────────────────────────────────────────────────
-function StoryMeta({ t, story, compact }) {
+function StoryMeta({ t, story, compact, onRate }) {
   return (
     <div style={{ marginTop: 10 }}>
       <div style={{
@@ -201,9 +216,10 @@ function StoryMeta({ t, story, compact }) {
         display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
       }}>{story.title}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-        {story.type !== 'link' && (
-          <StarRating value={story.rating} size={10} color={t.accent} mutedColor="rgba(255,255,255,0.15)" />
-        )}
+        <StarRating
+          value={story.rating || 0} size={10} color={t.accent} mutedColor="rgba(255,255,255,0.15)"
+          onRate={onRate ? (n) => onRate(story.id, n) : undefined}
+        />
         <span style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 10, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' }}>
           {story.type === 'link' ? '· Gemini Storybook' : `· ${story.category}`}
         </span>
@@ -213,7 +229,7 @@ function StoryMeta({ t, story, compact }) {
 }
 
 // ─── Story card with overflow controls ───────────────────────
-function StoryCard({ t, item, onOpen, onDelete, onEditLink, coverH = 210 }) {
+function StoryCard({ t, item, onOpen, onDelete, onEditLink, onRate, coverH = 210 }) {
   const isSeed = (window.SW_SEEDS || []).some(s => s.id === item.id);
   return (
     <div style={{ position: 'relative' }}>
@@ -221,7 +237,7 @@ function StoryCard({ t, item, onOpen, onDelete, onEditLink, coverH = 210 }) {
         background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', width: '100%',
       }}>
         <Cover story={item} mode={t.coverMode} w="100%" h={coverH} radius={20} badge={item.type === 'link'} />
-        <StoryMeta t={t} story={item} />
+        <StoryMeta t={t} story={item} onRate={onRate} />
       </button>
       {!isSeed && (
         <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
@@ -255,17 +271,17 @@ function StoryCard({ t, item, onOpen, onDelete, onEditLink, coverH = 210 }) {
   );
 }
 
-function SimpleGrid({ t, stories, onOpen, onDelete, onEditLink }) {
+function SimpleGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
       {stories.map(s => (
-        <StoryCard key={s.id} t={t} item={s} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
+        <StoryCard key={s.id} t={t} item={s} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} onRate={onRate} />
       ))}
     </div>
   );
 }
 
-function PinterestGrid({ t, stories, onOpen, onDelete, onEditLink }) {
+function PinterestGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, gridAutoRows: '10px' }}>
       {stories.map((s, i) => {
@@ -274,7 +290,7 @@ function PinterestGrid({ t, stories, onOpen, onDelete, onEditLink }) {
         const rowSpan = Math.ceil((h + 80) / 12);
         return (
           <div key={s.id} style={{ gridRow: `span ${rowSpan}` }}>
-            <StoryCard t={t} item={s} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} coverH={h} />
+            <StoryCard t={t} item={s} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} onRate={onRate} coverH={h} />
           </div>
         );
       })}
@@ -282,7 +298,7 @@ function PinterestGrid({ t, stories, onOpen, onDelete, onEditLink }) {
   );
 }
 
-function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink }) {
+function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
   const [hero, ...rest] = stories;
   if (!hero) return null;
   return (
@@ -300,12 +316,15 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink }) {
               fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
               fontSize: 24, lineHeight: 1.1, color: t.text, letterSpacing: -0.4,
             }}>{hero.title}</div>
-            {hero.type !== 'link' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                <StarRating value={hero.rating} size={12} color={t.accent} mutedColor="rgba(255,255,255,0.12)" />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+              <StarRating
+                value={hero.rating || 0} size={12} color={t.accent} mutedColor="rgba(255,255,255,0.12)"
+                onRate={onRate ? (n) => onRate(hero.id, n) : undefined}
+              />
+              {hero.type !== 'link' && (
                 <span style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 12 }}>· 4 min read</span>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </button>
         {!(window.SW_SEEDS || []).some(s => s.id === hero.id) && (
@@ -333,7 +352,7 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         {rest.map(s => (
-          <StoryCard key={s.id} t={t} item={s} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} coverH={180} />
+          <StoryCard key={s.id} t={t} item={s} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} onRate={onRate} coverH={180} />
         ))}
       </div>
     </div>
@@ -491,7 +510,40 @@ function Slider({ t, value, min, max, onChange }) {
 
 // ─── Settings ─────────────────────────────────────────────────
 function Settings({ t, onOpenKeyModal }) {
+  const [childName, setChildNameLocal] = useState(() => window.SW?.getChildName() || 'Sophie');
+  const [birthday,  setBirthdayLocal]  = useState(() => window.SW?.getChildBirthday() || '');
+  const [sampleSet, setSampleSet]      = useState(() => !!window.SW?.getSampleImage());
+  const photoInputRef = useRef(null);
   const apiConfigured = window.SW?.hasApiKey();
+
+  const computeAge = (bd) => {
+    if (!bd) return null;
+    const d = new Date(bd), now = new Date();
+    let age = now.getFullYear() - d.getFullYear();
+    const m = now.getMonth() - d.getMonth();
+    if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--;
+    return age >= 0 ? age : null;
+  };
+
+  const age     = computeAge(birthday);
+  const initial = (childName || 'S')[0].toUpperCase();
+
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const dataUrl = await window.SW.compressImageForStorage(file);
+      window.SW.setSampleImage(dataUrl);
+      setSampleSet(true);
+    } catch {}
+  };
+
+  const handleClearPhoto = () => {
+    window.SW?.clearSampleImage();
+    setSampleSet(false);
+    if (photoInputRef.current) photoInputRef.current.value = '';
+  };
+
   const rows = [
     { icon: 'wand',     title: 'Gemini API key',   detail: apiConfigured ? 'Configured' : 'Not set', onClick: onOpenKeyModal },
     { icon: 'moon',     title: 'Reader theme',      detail: 'Warm dark' },
@@ -499,31 +551,97 @@ function Settings({ t, onOpenKeyModal }) {
     { icon: 'sparkles', title: 'Magic level',       detail: 'Cozy' },
     { icon: 'star',     title: 'Favorites',         detail: '8 stories' },
   ];
+
   return (
     <div style={{ padding: '60px 20px 130px', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
       <div style={{ marginBottom: 22 }}>
         <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontWeight: 600, fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase' }}>Profile</div>
-        <h1 style={{
-          margin: '4px 0 0', fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
-          fontSize: t.titleSize, color: t.text, letterSpacing: -0.6, lineHeight: 1.05,
-        }}>Sophie</h1>
+        <input
+          value={childName}
+          onChange={(e) => setChildNameLocal(e.target.value)}
+          onBlur={() => window.SW?.setChildName(childName)}
+          style={{
+            display: 'block', width: '100%', border: 'none', outline: 'none', background: 'transparent',
+            margin: '4px 0 0', fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
+            fontSize: t.titleSize, color: t.text, letterSpacing: -0.6, lineHeight: 1.05, padding: 0,
+          }}
+        />
       </div>
+
       <div style={{
         background: t.glass, border: `1px solid ${t.glassBorder}`,
         backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
         borderRadius: 22, padding: 20, marginBottom: 18,
         display: 'flex', alignItems: 'center', gap: 14,
       }}>
-        <div style={{ width: 64, height: 64, borderRadius: 999,
+        <div style={{
+          width: 64, height: 64, borderRadius: 999,
           background: `linear-gradient(140deg, ${t.accent}, #ec4899)`,
           display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28,
           fontFamily: t.fontHead, fontWeight: t.headWeight, color: '#1a0a3e',
-          boxShadow: `0 8px 20px ${t.accent}55` }}>S</div>
+          boxShadow: `0 8px 20px ${t.accent}55`, flexShrink: 0,
+        }}>{initial}</div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle, fontSize: 18, color: t.text }}>3 years old</div>
+          <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle, fontSize: 18, color: t.text }}>
+            {age !== null ? `${age} year${age !== 1 ? 's' : ''} old` : 'Set birthday below'}
+          </div>
           <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 13, fontWeight: 600, marginTop: 2 }}>26 stories read · 12 favorites</div>
         </div>
       </div>
+
+      {/* Birthday field */}
+      <div style={{
+        background: t.glass, border: `1px solid ${t.glassBorder}`,
+        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        borderRadius: 22, padding: '14px 20px', marginBottom: 18,
+        display: 'flex', alignItems: 'center', gap: 14,
+      }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: t.accentSoft, color: t.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon name="cake" size={18} stroke={2} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', color: t.textMuted, marginBottom: 4 }}>Birthday</div>
+          <input
+            type="date"
+            value={birthday}
+            onChange={(e) => { setBirthdayLocal(e.target.value); window.SW?.setChildBirthday(e.target.value); }}
+            style={{ border: 'none', outline: 'none', background: 'transparent', color: t.text, fontFamily: t.fontBody, fontSize: 15, fontWeight: 500, width: '100%', colorScheme: 'dark' }}
+          />
+        </div>
+      </div>
+
+      {/* Sample reference photo for image generation */}
+      <div style={{
+        background: t.glass, border: `1px solid ${t.glassBorder}`,
+        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        borderRadius: 22, padding: '14px 20px', marginBottom: 18,
+        display: 'flex', alignItems: 'center', gap: 14,
+      }}>
+        <div style={{ width: 36, height: 36, borderRadius: 10, background: t.accentSoft, color: t.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <Icon name="image" size={18} stroke={2} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', color: t.textMuted, marginBottom: 4 }}>Illustration reference</div>
+          <div style={{ fontFamily: t.fontBody, fontSize: 14, color: t.text, fontWeight: 500 }}>
+            {sampleSet ? 'Reference photo set' : 'No reference photo'}
+          </div>
+        </div>
+        <input ref={photoInputRef} type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display: 'none' }} />
+        {sampleSet ? (
+          <button onClick={handleClearPhoto} style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: '#f87171', fontFamily: t.fontBody, fontWeight: 600, fontSize: 13,
+            padding: '4px 8px', borderRadius: 8, flexShrink: 0,
+          }}>Clear</button>
+        ) : (
+          <button onClick={() => photoInputRef.current?.click()} style={{
+            background: t.accentSoft, border: `1px solid ${t.accent}44`, cursor: 'pointer',
+            color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
+            padding: '6px 12px', borderRadius: 10, flexShrink: 0,
+          }}>Upload</button>
+        )}
+      </div>
+
       <div style={{
         background: t.glass, border: `1px solid ${t.glassBorder}`,
         backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
@@ -657,6 +775,7 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
 
 // ─── Weaving (loading / error) ────────────────────────────────
 function Weaving({ t, error }) {
+  const childName = window.SW?.getChildName() || 'your child';
   const steps = [
     'Gathering moonlight',
     'Calling the characters',
@@ -728,7 +847,7 @@ function Weaving({ t, error }) {
         <h1 style={{
           margin: 0, fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
           fontSize: 30, lineHeight: 1.15, color: t.text, letterSpacing: -0.5,
-        }}>A new story for Sophie…</h1>
+        }}>A new story for {childName}…</h1>
         <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {steps.map((s, i) => (
             <div key={s} style={{
