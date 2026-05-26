@@ -59,30 +59,115 @@ function StoryWeaverApp() {
   const route = useHashRoute();
   const theme = TH_STARRY;
 
-  // Parse route → tab + overlay
+  // ─── Items state (persisted + seeds merged) ───────────────
+  const [items, setItems] = React.useState(() => window.SW.mergeItems([]));
+  React.useEffect(() => {
+    window.SW.itemsAll()
+      .then(p => setItems(window.SW.mergeItems(p)))
+      .catch(() => {/* keep seeds */});
+  }, []);
+
+  // ─── Lifted Creator form state ────────────────────────────
+  const [context, setContext] = React.useState("Sophie played in the garden today and found a lonely beetle.");
+  const [vocab,   setVocab]   = React.useState(['curious', 'tiny', 'gentle']);
+  const [length,  setLength]  = React.useState(4);
+  const [tone,    setTone]    = React.useState(3);
+
+  // ─── Overlay / modal state ────────────────────────────────
+  const [keyModalOpen, setKeyModalOpen] = React.useState(false);
+  const [addLinkOpen,  setAddLinkOpen]  = React.useState(false);
+  const [editingLink,  setEditingLink]  = React.useState(null);
+  const [weaveError,   setWeaveError]   = React.useState(null);
+
+  // ─── Route parsing ────────────────────────────────────────
   const tab =
     route.startsWith('/create')   ? 'create'   :
     route.startsWith('/me')       ? 'settings' :
                                     'library';
   const storyMatch = route.match(/^\/story\/(.+)$/);
-  const openStory = storyMatch ? window.SW_STORIES.find(s => s.id === storyMatch[1]) : null;
+  const openStory  = storyMatch
+    ? items.find(s => s.type !== 'link' && s.id === storyMatch[1])
+    : null;
   const isWeaving = route === '/weaving';
 
-  // Pin theme-color to the active background so the iOS status bar matches
-  // when the app is installed as a PWA.
   React.useEffect(() => {
     const m = document.querySelector('meta[name="theme-color"]');
     if (m) m.setAttribute('content', '#020617');
   }, []);
 
-  const onWeave = () => {
+  // ─── Handlers ────────────────────────────────────────────
+  const onOpen = (item) => {
+    if (item.type === 'link') {
+      window.open(item.url, '_blank', 'noopener');
+    } else {
+      navigate('/story/' + item.id);
+    }
+  };
+
+  const onWeave = async (form) => {
+    if (!window.SW.hasApiKey()) { setKeyModalOpen(true); return; }
+    setWeaveError(null);
     navigate('/weaving');
-    // Mock: pretend Gemini call takes ~4s, then drop into the moon story.
-    setTimeout(() => navigate('/story/moon'), 4200);
+    try {
+      const story = await window.SW.weaveStory(form, items.map(i => i.id));
+      await window.SW.itemPut(story);
+      setItems(prev => [story, ...prev]);
+      navigate('/story/' + story.id);
+    } catch (err) {
+      setWeaveError(err.message || 'Something went wrong weaving the story.');
+      setTimeout(() => { setWeaveError(null); navigate('/create'); }, 2800);
+    }
+  };
+
+  const onSaveLink = async (data, editingId) => {
+    if (editingId) {
+      const existing = items.find(i => i.id === editingId);
+      const updated  = { ...existing, ...data };
+      await window.SW.itemPut(updated);
+      setItems(prev => prev.map(i => i.id === editingId ? updated : i));
+    } else {
+      const newLink = {
+        id: window.SW.uniqueId(window.SW.slugify(data.title), items.map(i => i.id)),
+        type: 'link',
+        ...data,
+        createdAt: Date.now(),
+      };
+      await window.SW.itemPut(newLink);
+      setItems(prev => [newLink, ...prev]);
+    }
+    setAddLinkOpen(false);
+    setEditingLink(null);
+  };
+
+  const onRate = async (id, n) => {
+    const seedIds = (window.SW_SEEDS || []).map(s => s.id);
+    if (seedIds.includes(id)) {
+      window.SW.saveSeedRating(id, n);
+    } else {
+      const item = items.find(i => i.id === id);
+      if (item) await window.SW.itemPut({ ...item, rating: n });
+    }
+    setItems(prev => prev.map(i => i.id === id ? { ...i, rating: n } : i));
+  };
+
+  const onDelete = async (id) => {
+    await window.SW.itemDelete(id);
+    setItems(prev => prev.filter(i => i.id !== id));
+    if (route.startsWith('/story/')) navigate('/');
   };
 
   const onTabChange = (id) => {
     navigate(id === 'library' ? '/' : id === 'create' ? '/create' : '/me');
+  };
+
+  const onEditLink = (item) => {
+    setEditingLink(item);
+    setAddLinkOpen(true);
+  };
+
+  const onOpenAddLink = () => {
+    setEditingLink(null);
+    setAddLinkOpen(true);
   };
 
   return (
@@ -93,15 +178,39 @@ function StoryWeaverApp() {
       <Starfield />
 
       <div style={{ position: 'absolute', inset: 0 }}>
-        {tab === 'library'  && <Library t={theme} onOpen={(s) => navigate('/story/' + s.id)} />}
-        {tab === 'create'   && <Creator t={theme} onWeave={onWeave} />}
-        {tab === 'settings' && <Settings t={theme} />}
+        {tab === 'library'  && (
+          <Library t={theme} items={items} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
+        )}
+        {tab === 'create'   && (
+          <Creator t={theme} onWeave={onWeave} onAddLink={onOpenAddLink}
+            context={context} setContext={setContext}
+            vocab={vocab} setVocab={setVocab}
+            length={length} setLength={setLength}
+            tone={tone} setTone={setTone} />
+        )}
+        {tab === 'settings' && (
+          <Settings t={theme} onOpenKeyModal={() => setKeyModalOpen(true)} />
+        )}
       </div>
 
       <BottomNav t={theme} tab={tab} onChange={onTabChange} />
 
-      {openStory && <Reader t={theme} story={openStory} onClose={() => history.back()} />}
-      {isWeaving && <Weaving t={theme} />}
+      {openStory && (
+        <Reader t={theme} story={openStory} onClose={() => history.back()} onRate={onRate} onDelete={onDelete} />
+      )}
+      {isWeaving && <Weaving t={theme} error={weaveError} />}
+
+      {keyModalOpen && (
+        <ApiKeyModal t={theme} open={keyModalOpen} onClose={() => setKeyModalOpen(false)} />
+      )}
+      {addLinkOpen && (
+        <AddLinkModal
+          t={theme} open={addLinkOpen}
+          onClose={() => { setAddLinkOpen(false); setEditingLink(null); }}
+          onSave={onSaveLink}
+          item={editingLink}
+        />
+      )}
     </div>
   );
 }

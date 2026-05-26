@@ -1,0 +1,267 @@
+// StoryWeaver persistent store
+// Exports window.SW — must load after data.js, before cover.jsx / screens.jsx / app.jsx
+
+const TEXT_MODEL  = "gemini-2.5-flash";
+const IMAGE_MODEL = "gemini-2.5-flash-preview-04-17";
+
+// Capture seeds once; stays static throughout the session
+window.SW_SEEDS = window.SW_STORIES;
+
+// ─── IndexedDB wrapper ────────────────────────────────────────
+let _db = null;
+function dbOpen() {
+  if (_db) return Promise.resolve(_db);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('storyweaver', 1);
+    req.onupgradeneeded = (e) => {
+      if (!e.target.result.objectStoreNames.contains('items')) {
+        e.target.result.createObjectStore('items', { keyPath: 'id' });
+      }
+    };
+    req.onsuccess = (e) => { _db = e.target.result; resolve(_db); };
+    req.onerror  = ()  => reject(req.error);
+  });
+}
+
+function itemsAll() {
+  return dbOpen().then(db => new Promise((resolve, reject) => {
+    const req = db.transaction('items', 'readonly').objectStore('items').getAll();
+    req.onsuccess = () => {
+      const arr = req.result || [];
+      arr.sort((a, b) => b.createdAt - a.createdAt);
+      resolve(arr);
+    };
+    req.onerror = () => reject(req.error);
+  }));
+}
+
+function itemPut(item) {
+  return dbOpen().then(db => new Promise((resolve, reject) => {
+    const req = db.transaction('items', 'readwrite').objectStore('items').put(item);
+    req.onsuccess = () => resolve();
+    req.onerror  = ()  => reject(req.error);
+  }));
+}
+
+function itemDelete(id) {
+  return dbOpen().then(db => new Promise((resolve, reject) => {
+    const req = db.transaction('items', 'readwrite').objectStore('items').delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror  = ()  => reject(req.error);
+  }));
+}
+
+// ─── API key helpers ──────────────────────────────────────────
+function getApiKey()  { return localStorage.getItem('sw_gemini_key') || ''; }
+function setApiKey(k) { localStorage.setItem('sw_gemini_key', k); }
+function hasApiKey()  { return !!localStorage.getItem('sw_gemini_key'); }
+
+async function validateApiKey(k) {
+  try {
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
+      headers: { 'x-goog-api-key': k },
+    });
+    return r.ok;
+  } catch { return false; }
+}
+
+// ─── Seed rating helpers ──────────────────────────────────────
+function getSeedRatings() {
+  try { return JSON.parse(localStorage.getItem('sw_seed_ratings') || '{}'); }
+  catch { return {}; }
+}
+function saveSeedRating(id, n) {
+  const r = getSeedRatings();
+  r[id] = n;
+  localStorage.setItem('sw_seed_ratings', JSON.stringify(r));
+}
+
+// ─── Merge persisted items + seeds ───────────────────────────
+function mergeItems(persisted) {
+  const ratings = getSeedRatings();
+  const seedIds = new Set((window.SW_SEEDS || []).map(s => s.id));
+  const nonSeed = persisted.filter(i => !seedIds.has(i.id));
+  const seeds   = (window.SW_SEEDS || []).map(s => ({
+    ...s,
+    type: 'story',
+    rating: ratings[s.id] !== undefined ? ratings[s.id] : s.rating,
+    createdAt: 0,
+  }));
+  return [...nonSeed, ...seeds];
+}
+
+// ─── ID helpers ───────────────────────────────────────────────
+function slugify(title) {
+  return ((title || 'story'))
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-') || 'story';
+}
+function uniqueId(base, existingIds) {
+  if (!existingIds.includes(base)) return base;
+  let n = 2;
+  while (existingIds.includes(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+// ─── Image compression ────────────────────────────────────────
+function compressToWebp(base64Png) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width  = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        const result = canvas.toDataURL('image/webp', 0.6);
+        resolve(result.startsWith('data:image/webp') ? result : `data:image/png;base64,${base64Png}`);
+      } catch { resolve(`data:image/png;base64,${base64Png}`); }
+    };
+    img.onerror = () => resolve(`data:image/png;base64,${base64Png}`);
+    img.src = `data:image/png;base64,${base64Png}`;
+  });
+}
+
+// ─── Story schema ─────────────────────────────────────────────
+const STORY_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    id:       { type: 'STRING' },
+    title:    { type: 'STRING' },
+    category: { type: 'STRING', enum: ['Bedtime','Animals','Magic','Adventure','Friends'] },
+    rating:   { type: 'INTEGER' },
+    palette:  { type: 'ARRAY', items: { type: 'STRING' } },
+    scene:    { type: 'STRING', enum: ['moon','fox','unicorn','whale','dragon','bear','cloud','turtle'] },
+    vocab:    { type: 'ARRAY', items: { type: 'STRING' } },
+    body:     { type: 'ARRAY', items: { type: 'STRING' } },
+  },
+  required: ['id','title','category','rating','palette','scene','vocab','body'],
+  propertyOrdering: ['id','title','category','rating','palette','scene','vocab','body'],
+};
+
+const VALID_SCENES     = ['moon','fox','unicorn','whale','dragon','bear','cloud','turtle'];
+const VALID_CATEGORIES = ['Bedtime','Animals','Magic','Adventure','Friends'];
+const TONE_WORDS       = ['Calming','Cozy','Gentle','Playful','Adventurous'];
+
+function guessScene(context) {
+  const lc = context.toLowerCase();
+  for (const s of VALID_SCENES) { if (lc.includes(s)) return s; }
+  return 'moon';
+}
+
+// ─── Gemini API calls ─────────────────────────────────────────
+async function textCall(form, existingIds) {
+  const toneWord    = TONE_WORDS[form.tone - 1];
+  const targetParas = Math.max(3, Math.round(form.length / 0.7));
+  const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text:
+            "You write warm children's bedtime stories and return ONLY JSON matching the schema. " +
+            "RULES: every word in the provided vocabulary list MUST appear in `body[]` wrapped in " +
+            "curly braces exactly as given (e.g. `{gentle}`) — do not inflect, pluralize, or alter " +
+            "the word inside the braces; also list each vocab word, unbraced, in `vocab[]`. " +
+            "One short paragraph per `body[]` element. " +
+            "`scene` must be one of: moon, fox, unicorn, whale, dragon, bear, cloud, turtle. " +
+            "`category` must be one of: Bedtime, Animals, Magic, Adventure, Friends. " +
+            "`palette` is exactly three `#rrggbb` colors: dark base, mid tone, light accent. " +
+            "`id` is kebab-case from the title. `rating` is 0."
+          }],
+        },
+        contents: [{
+          role: 'user',
+          parts: [{ text: `Context: ${form.context}\nTone: ${toneWord}\nTarget length: ~${targetParas} paragraphs${vocabStr}` }],
+        }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: STORY_SCHEMA,
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 400 || res.status === 403) {
+      throw new Error('Gemini rejected the request (check your API key).');
+    }
+    throw new Error(body?.error?.message || 'Gemini returned an unexpected response. Please try again.');
+  }
+
+  const data = await res.json();
+  if (data.promptFeedback?.blockReason) {
+    throw new Error('The story was blocked — try gentler wording.');
+  }
+
+  let story;
+  try { story = JSON.parse(data.candidates[0].content.parts[0].text); }
+  catch { throw new Error('Gemini returned an unexpected response. Please try again.'); }
+
+  story.rating   = 0;
+  story.palette  = Array.isArray(story.palette) && story.palette.length >= 3
+    ? story.palette.slice(0, 3)
+    : ['#0f172a','#312e81','#fbbf24'];
+  story.scene    = VALID_SCENES.includes(story.scene)     ? story.scene    : 'moon';
+  story.category = VALID_CATEGORIES.includes(story.category) ? story.category : 'Bedtime';
+  if (!Array.isArray(story.body))  story.body  = [];
+  if (!Array.isArray(story.vocab)) story.vocab = [];
+  story.id = uniqueId(slugify(story.title), existingIds);
+
+  return story;
+}
+
+async function imageCall(form) {
+  const toneWord    = TONE_WORDS[form.tone - 1];
+  const imagePrompt =
+    `A soft, dreamy children's picture-book cover illustration. ` +
+    `${form.context}. Mood: ${toneWord}, calming night-time palette. ` +
+    `Portrait orientation, no text or lettering in the image.`;
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: imagePrompt }] }],
+        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+      }),
+    }
+  );
+
+  if (!res.ok) throw new Error('Image generation failed.');
+
+  const data   = await res.json();
+  const parts  = data?.candidates?.[0]?.content?.parts || [];
+  const imgPart = parts.find(p => p.inlineData || p.inline_data);
+  if (!imgPart) throw new Error('No image in response.');
+
+  const inlineData = imgPart.inlineData || imgPart.inline_data;
+  return compressToWebp(inlineData.data);
+}
+
+// ─── Main weave entry point ───────────────────────────────────
+async function weaveStory(form, existingIds) {
+  const [story, image] = await Promise.all([
+    textCall(form, existingIds),
+    imageCall(form).catch(() => null),
+  ]);
+  return { ...story, type: 'story', coverImage: image, createdAt: Date.now() };
+}
+
+// ─── Export ───────────────────────────────────────────────────
+window.SW = {
+  dbOpen, itemsAll, itemPut, itemDelete,
+  getApiKey, setApiKey, hasApiKey, validateApiKey,
+  getSeedRatings, saveSeedRating,
+  mergeItems, uniqueId, slugify,
+  weaveStory,
+};

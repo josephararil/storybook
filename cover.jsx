@@ -4,7 +4,7 @@
 //   • 'pop'  (Dreamland Pop) — flat pastel, chunky, friendly
 //   • 'line' (Constellation) — line art on deep base, gold strokes
 
-function Cover({ story, w = 160, h = 220, mode = 'glow', radius = 18 }) {
+function Cover({ story, w = 160, h = 220, mode = 'glow', radius = 18, badge = false }) {
   const [c1, c2, c3] = story.palette;
 
   const bg = mode === 'pop'
@@ -23,12 +23,37 @@ function Cover({ story, w = 160, h = 220, mode = 'glow', radius = 18 }) {
         ? '0 4px 16px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(212,160,23,0.25)'
         : '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.08)',
     }}>
-      <Scene scene={story.scene} mode={mode} c1={c1} c2={c2} c3={c3} w={w} h={h} />
-      {mode === 'glow' && (
-        <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(80% 60% at 50% 20%, rgba(255,255,255,0.12), transparent 60%)', pointerEvents: 'none' }} />
+      {story.coverImage ? (
+        <img src={story.coverImage} alt="" style={{
+          width: '100%', height: '100%', objectFit: 'cover', display: 'block',
+        }} />
+      ) : (
+        <>
+          <Scene scene={story.scene} mode={mode} c1={c1} c2={c2} c3={c3} w={w} h={h} />
+          {mode === 'glow' && (
+            <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(80% 60% at 50% 20%, rgba(255,255,255,0.12), transparent 60%)', pointerEvents: 'none' }} />
+          )}
+          {mode === 'pop' && (
+            <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.85)', letterSpacing: 0.5, textTransform: 'uppercase' }}>{story.category}</div>
+          )}
+        </>
       )}
-      {mode === 'pop' && (
-        <div style={{ position: 'absolute', top: 8, right: 10, fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,0.85)', letterSpacing: 0.5, textTransform: 'uppercase' }}>{story.category}</div>
+      {badge && (
+        <div style={{
+          position: 'absolute', bottom: 8, right: 8,
+          background: 'rgba(15, 12, 40, 0.78)',
+          backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255,255,255,0.18)',
+          borderRadius: 999, padding: '3px 8px',
+          display: 'flex', alignItems: 'center', gap: 4,
+          color: '#fbbf24', fontSize: 10, fontWeight: 700, letterSpacing: 0.3,
+        }}>
+          <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+            <path d="M15 3h6v6" /><path d="M10 14L21 3" />
+          </svg>
+          Gemini
+        </div>
       )}
     </div>
   );

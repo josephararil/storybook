@@ -1,10 +1,10 @@
-// Story Weaver — three theme-driven screens
-// Library · Creator · Settings · Reader (overlay)
+// Story Weaver — screens, overlays, and modals
+// Library · Creator · Settings · Reader · Weaving · ApiKeyModal · AddLinkModal
 // Driven by the `t` theme object defined in app.jsx.
 
 const { useState, useEffect, useRef } = React;
 
-// ─── Icons (Lucide-style stroke icons, drawn inline) ─────────
+// ─── Icons ────────────────────────────────────────────────────
 function Icon({ name, size = 22, stroke = 2 }) {
   const props = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: stroke, strokeLinecap: 'round', strokeLinejoin: 'round' };
   const paths = {
@@ -19,11 +19,14 @@ function Icon({ name, size = 22, stroke = 2 }) {
     plus:     <><path d="M12 5v14M5 12h14" /></>,
     moon:     <><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></>,
     wand:     <><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M15 9h.01M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5" /></>,
+    link:     <><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>,
+    trash:    <><path d="M3 6h18" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /></>,
+    pencil:   <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></>,
   };
   return <svg {...props}>{paths[name]}</svg>;
 }
 
-// ─── Star rating ─────────────────────────────────────────────
+// ─── Star rating (display only) ───────────────────────────────
 function StarRating({ value, max = 5, size = 12, color, mutedColor }) {
   return (
     <div style={{ display: 'inline-flex', gap: 2, color }}>
@@ -36,12 +39,12 @@ function StarRating({ value, max = 5, size = 12, color, mutedColor }) {
   );
 }
 
-// ─── Bottom nav (renders by theme.navStyle) ─────────────────
+// ─── Bottom nav ───────────────────────────────────────────────
 function BottomNav({ t, tab, onChange }) {
   const items = [
-    { id: 'library', icon: 'library', label: 'Library' },
-    { id: 'create',  icon: 'sparkles', label: 'Create' },
-    { id: 'settings',icon: 'settings', label: 'Me' },
+    { id: 'library',  icon: 'library',  label: 'Library' },
+    { id: 'create',   icon: 'sparkles', label: 'Create'  },
+    { id: 'settings', icon: 'settings', label: 'Me'      },
   ];
   if (t.navStyle === 'pill') {
     return (
@@ -103,7 +106,6 @@ function BottomNav({ t, tab, onChange }) {
       </div>
     );
   }
-  // 'minimal' — Constellation
   return (
     <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingBottom: 30, paddingTop: 8,
       background: 'linear-gradient(180deg, transparent, rgba(5,5,20,0.92))',
@@ -128,14 +130,15 @@ function BottomNav({ t, tab, onChange }) {
   );
 }
 
-// ─── Library ─────────────────────────────────────────────────
-function Library({ t, onOpen }) {
+// ─── Library ──────────────────────────────────────────────────
+function Library({ t, items, onOpen, onDelete, onEditLink }) {
   const [query, setQuery] = useState('');
-  const stories = window.SW_STORIES.filter(s =>
-    !query || s.title.toLowerCase().includes(query.toLowerCase()) || s.category.toLowerCase().includes(query.toLowerCase())
+  const filtered = items.filter(s =>
+    !query ||
+    s.title.toLowerCase().includes(query.toLowerCase()) ||
+    (s.category && s.category.toLowerCase().includes(query.toLowerCase()))
   );
 
-  // Search bar
   const search = (
     <div style={{ position: 'relative', display: 'flex', alignItems: 'center',
       background: t.glass, border: `1px solid ${t.glassBorder}`,
@@ -153,20 +156,18 @@ function Library({ t, onOpen }) {
 
   return (
     <div style={{ padding: '60px 20px 130px', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
-      {/* greeting */}
       <div style={{ marginBottom: 18 }}>
         <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontWeight: 600, fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase' }}>For Sophie</div>
         <h1 style={{
           margin: '4px 0 0', fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
           fontSize: t.titleSize, color: t.text, letterSpacing: t.headStyle === 'italic' ? -0.5 : -0.8, lineHeight: 1.05,
         }}>
-          {t.libraryGreeting || 'Tonight\u2019s\nstories'}
+          {t.libraryGreeting || "Tonight’s\nstories"}
         </h1>
       </div>
 
       {search}
 
-      {/* category chips */}
       <div style={{ display: 'flex', gap: 8, margin: '18px 0 16px', overflowX: 'auto', paddingBottom: 4 }}>
         {['All', 'Bedtime', 'Animals', 'Magic', 'Adventure', 'Friends'].map((c, i) => (
           <div key={c} style={{
@@ -174,24 +175,23 @@ function Library({ t, onOpen }) {
             background: i === 0 ? t.accent : t.glass,
             color: i === 0 ? '#1a0a3e' : t.textMuted,
             border: i === 0 ? 'none' : `1px solid ${t.glassBorder}`,
-            fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
-            letterSpacing: 0.3,
+            fontFamily: t.fontBody, fontWeight: 700, fontSize: 12, letterSpacing: 0.3,
           }}>{c}</div>
         ))}
       </div>
 
-      {/* Grid */}
       {t.layout === 'editorial' ? (
-        <EditorialGrid t={t} stories={stories} onOpen={onOpen} />
+        <EditorialGrid t={t} stories={filtered} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
       ) : t.layout === 'pinterest' ? (
-        <PinterestGrid t={t} stories={stories} onOpen={onOpen} />
+        <PinterestGrid t={t} stories={filtered} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
       ) : (
-        <SimpleGrid t={t} stories={stories} onOpen={onOpen} />
+        <SimpleGrid t={t} stories={filtered} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
       )}
     </div>
   );
 }
 
+// ─── Card meta ────────────────────────────────────────────────
 function StoryMeta({ t, story, compact }) {
   return (
     <div style={{ marginTop: 10 }}>
@@ -201,93 +201,148 @@ function StoryMeta({ t, story, compact }) {
         display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
       }}>{story.title}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-        <StarRating value={story.rating} size={10} color={t.accent} mutedColor="rgba(255,255,255,0.15)" />
-        <span style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 10, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' }}>· {story.category}</span>
+        {story.type !== 'link' && (
+          <StarRating value={story.rating} size={10} color={t.accent} mutedColor="rgba(255,255,255,0.15)" />
+        )}
+        <span style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 10, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' }}>
+          {story.type === 'link' ? '· Gemini Storybook' : `· ${story.category}`}
+        </span>
       </div>
     </div>
   );
 }
 
-function SimpleGrid({ t, stories, onOpen }) {
+// ─── Story card with overflow controls ───────────────────────
+function StoryCard({ t, item, onOpen, onDelete, onEditLink, coverH = 210 }) {
+  const isSeed = (window.SW_SEEDS || []).some(s => s.id === item.id);
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => onOpen(item)} style={{
+        background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', width: '100%',
+      }}>
+        <Cover story={item} mode={t.coverMode} w="100%" h={coverH} radius={20} badge={item.type === 'link'} />
+        <StoryMeta t={t} story={item} />
+      </button>
+      {!isSeed && (
+        <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
+          {item.type === 'link' && onEditLink && (
+            <button onClick={(e) => { e.stopPropagation(); onEditLink(item); }} style={{
+              width: 30, height: 30, borderRadius: 999,
+              background: 'rgba(15, 12, 40, 0.78)',
+              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              color: '#fbbf24', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Icon name="pencil" size={13} stroke={2} />
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={(e) => { e.stopPropagation(); onDelete(item.id); }} style={{
+              width: 30, height: 30, borderRadius: 999,
+              background: 'rgba(15, 12, 40, 0.78)',
+              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              color: 'rgba(254,243,199,0.55)', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Icon name="trash" size={13} stroke={2} />
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimpleGrid({ t, stories, onOpen, onDelete, onEditLink }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
       {stories.map(s => (
-        <button key={s.id} onClick={() => onOpen(s)} style={{
-          background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left',
-        }}>
-          <Cover story={s} mode={t.coverMode} w="100%" h={210} radius={20} />
-          <StoryMeta t={t} story={s} />
-        </button>
+        <StoryCard key={s.id} t={t} item={s} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} />
       ))}
     </div>
   );
 }
 
-function PinterestGrid({ t, stories, onOpen }) {
-  // Alternating tall/short covers for masonry feel
+function PinterestGrid({ t, stories, onOpen, onDelete, onEditLink }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, gridAutoRows: '10px' }}>
       {stories.map((s, i) => {
-        const tall = i % 3 !== 1;
-        const h = tall ? 260 : 200;
+        const tall    = i % 3 !== 1;
+        const h       = tall ? 260 : 200;
         const rowSpan = Math.ceil((h + 80) / 12);
         return (
-          <button key={s.id} onClick={() => onOpen(s)} style={{
-            background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left',
-            gridRow: `span ${rowSpan}`,
-          }}>
-            <Cover story={s} mode={t.coverMode} w="100%" h={h} radius={24} />
-            <StoryMeta t={t} story={s} />
-          </button>
+          <div key={s.id} style={{ gridRow: `span ${rowSpan}` }}>
+            <StoryCard t={t} item={s} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} coverH={h} />
+          </div>
         );
       })}
     </div>
   );
 }
 
-function EditorialGrid({ t, stories, onOpen }) {
+function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink }) {
   const [hero, ...rest] = stories;
   if (!hero) return null;
   return (
     <div>
-      <button onClick={() => onOpen(hero)} style={{
-        background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left',
-        width: '100%', marginBottom: 18,
-      }}>
-        <Cover story={hero} mode={t.coverMode} w="100%" h={260} radius={2} />
-        <div style={{ marginTop: 14, paddingBottom: 10, borderBottom: `1px solid ${t.glassBorder}` }}>
-          <div style={{ color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 6 }}>Tonight's feature · {hero.category}</div>
-          <div style={{
-            fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
-            fontSize: 24, lineHeight: 1.1, color: t.text, letterSpacing: -0.4,
-          }}>{hero.title}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
-            <StarRating value={hero.rating} size={12} color={t.accent} mutedColor="rgba(255,255,255,0.12)" />
-            <span style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 12 }}>· 4 min read</span>
+      <div style={{ position: 'relative', marginBottom: 18 }}>
+        <button onClick={() => onOpen(hero)} style={{
+          background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', width: '100%',
+        }}>
+          <Cover story={hero} mode={t.coverMode} w="100%" h={260} radius={2} badge={hero.type === 'link'} />
+          <div style={{ marginTop: 14, paddingBottom: 10, borderBottom: `1px solid ${t.glassBorder}` }}>
+            <div style={{ color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 6 }}>
+              Tonight's feature · {hero.type === 'link' ? 'Gemini Storybook' : hero.category}
+            </div>
+            <div style={{
+              fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
+              fontSize: 24, lineHeight: 1.1, color: t.text, letterSpacing: -0.4,
+            }}>{hero.title}</div>
+            {hero.type !== 'link' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                <StarRating value={hero.rating} size={12} color={t.accent} mutedColor="rgba(255,255,255,0.12)" />
+                <span style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 12 }}>· 4 min read</span>
+              </div>
+            )}
           </div>
-        </div>
-      </button>
+        </button>
+        {!(window.SW_SEEDS || []).some(s => s.id === hero.id) && (
+          <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
+            {hero.type === 'link' && onEditLink && (
+              <button onClick={(e) => { e.stopPropagation(); onEditLink(hero); }} style={{
+                width: 30, height: 30, borderRadius: 999,
+                background: 'rgba(15,12,40,0.78)', backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255,255,255,0.18)',
+                color: '#fbbf24', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}><Icon name="pencil" size={13} stroke={2} /></button>
+            )}
+            {onDelete && (
+              <button onClick={(e) => { e.stopPropagation(); onDelete(hero.id); }} style={{
+                width: 30, height: 30, borderRadius: 999,
+                background: 'rgba(15,12,40,0.78)', backdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255,255,255,0.18)',
+                color: 'rgba(254,243,199,0.55)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}><Icon name="trash" size={13} stroke={2} /></button>
+            )}
+          </div>
+        )}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         {rest.map(s => (
-          <button key={s.id} onClick={() => onOpen(s)} style={{
-            background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left',
-          }}>
-            <Cover story={s} mode={t.coverMode} w="100%" h={180} radius={2} />
-            <StoryMeta t={t} story={s} compact />
-          </button>
+          <StoryCard key={s.id} t={t} item={s} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} coverH={180} />
         ))}
       </div>
     </div>
   );
 }
 
-// ─── Creator ─────────────────────────────────────────────────
-function Creator({ t, onWeave }) {
-  const [context, setContext] = useState("Sophie played in the garden today and found a lonely beetle.");
+// ─── Creator ──────────────────────────────────────────────────
+function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, length, setLength, tone, setTone }) {
   const [vocabInput, setVocabInput] = useState('');
-  const [vocab, setVocab] = useState(['curious', 'tiny', 'gentle']);
-  const [length, setLength] = useState(4);
-  const [tone, setTone] = useState(3);
 
   const addVocab = (e) => {
     if ((e.key === ',' || e.key === 'Enter' || e.key === ' ') && vocabInput.trim()) {
@@ -311,12 +366,36 @@ function Creator({ t, onWeave }) {
 
   return (
     <div style={{ padding: '60px 20px 130px', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
-      <div style={{ marginBottom: 22 }}>
+      <div style={{ marginBottom: 18 }}>
         <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontWeight: 600, fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase' }}>Create</div>
         <h1 style={{
           margin: '4px 0 0', fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
           fontSize: t.titleSize, color: t.text, letterSpacing: -0.6, lineHeight: 1.05,
         }}>Weave a story</h1>
+      </div>
+
+      {/* Chooser cards */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+        <div style={{
+          flex: 1, background: t.accentSoft, border: `1px solid ${t.accent}44`,
+          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+          borderRadius: 18, padding: '14px 10px',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, textAlign: 'center',
+        }}>
+          <Icon name="sparkles" size={18} stroke={2} />
+          <div style={{ fontFamily: t.fontBody, fontWeight: 700, fontSize: 12, color: t.accent }}>Bespoke tale</div>
+          <div style={{ fontFamily: t.fontBody, fontSize: 11, color: t.textMuted, lineHeight: 1.3 }}>AI-generated story</div>
+        </div>
+        <button onClick={onAddLink} style={{
+          flex: 1, background: t.glass, border: `1px solid ${t.glassBorder}`,
+          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+          borderRadius: 18, padding: '14px 10px', cursor: 'pointer',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, textAlign: 'center',
+        }}>
+          <Icon name="link" size={18} stroke={2} />
+          <div style={{ fontFamily: t.fontBody, fontWeight: 700, fontSize: 12, color: t.text }}>Gemini Storybook</div>
+          <div style={{ fontFamily: t.fontBody, fontSize: 11, color: t.textMuted, lineHeight: 1.3 }}>Link an existing one</div>
+        </button>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -401,25 +480,24 @@ function Slider({ t, value, min, max, onChange }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
     <div style={{ position: 'relative', height: 32, marginTop: 8 }}>
-      <div style={{ position: 'absolute', top: 14, left: 0, right: 0, height: 4, borderRadius: 2,
-        background: 'rgba(255,255,255,0.1)' }} />
-      <div style={{ position: 'absolute', top: 14, left: 0, width: `${pct}%`, height: 4, borderRadius: 2,
-        background: `linear-gradient(90deg, ${t.accent}, ${tint(t.accent, 0.1)})` }} />
-      <div style={{ position: 'absolute', top: 6, left: `calc(${pct}% - 10px)`, width: 20, height: 20, borderRadius: 999,
-        background: '#fff', boxShadow: `0 2px 6px rgba(0,0,0,0.4), 0 0 0 3px ${t.accent}40` }} />
+      <div style={{ position: 'absolute', top: 14, left: 0, right: 0, height: 4, borderRadius: 2, background: 'rgba(255,255,255,0.1)' }} />
+      <div style={{ position: 'absolute', top: 14, left: 0, width: `${pct}%`, height: 4, borderRadius: 2, background: `linear-gradient(90deg, ${t.accent}, ${tint(t.accent, 0.1)})` }} />
+      <div style={{ position: 'absolute', top: 6, left: `calc(${pct}% - 10px)`, width: 20, height: 20, borderRadius: 999, background: '#fff', boxShadow: `0 2px 6px rgba(0,0,0,0.4), 0 0 0 3px ${t.accent}40` }} />
       <input type="range" min={min} max={max} value={value} onChange={(e) => onChange(Number(e.target.value))}
         style={{ position: 'absolute', inset: 0, width: '100%', opacity: 0, cursor: 'pointer' }} />
     </div>
   );
 }
 
-// ─── Settings ────────────────────────────────────────────────
-function Settings({ t }) {
+// ─── Settings ─────────────────────────────────────────────────
+function Settings({ t, onOpenKeyModal }) {
+  const apiConfigured = window.SW?.hasApiKey();
   const rows = [
-    { icon: 'moon', title: 'Reader theme', detail: 'Warm dark' },
-    { icon: 'book', title: 'Reading font size', detail: 'Large' },
-    { icon: 'sparkles', title: 'Magic level', detail: 'Cozy' },
-    { icon: 'star', title: 'Favorites', detail: '8 stories' },
+    { icon: 'wand',     title: 'Gemini API key',   detail: apiConfigured ? 'Configured' : 'Not set', onClick: onOpenKeyModal },
+    { icon: 'moon',     title: 'Reader theme',      detail: 'Warm dark' },
+    { icon: 'book',     title: 'Reading font size', detail: 'Large' },
+    { icon: 'sparkles', title: 'Magic level',       detail: 'Cozy' },
+    { icon: 'star',     title: 'Favorites',         detail: '8 stories' },
   ];
   return (
     <div style={{ padding: '60px 20px 130px', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
@@ -430,7 +508,6 @@ function Settings({ t }) {
           fontSize: t.titleSize, color: t.text, letterSpacing: -0.6, lineHeight: 1.05,
         }}>Sophie</h1>
       </div>
-      {/* avatar card */}
       <div style={{
         background: t.glass, border: `1px solid ${t.glassBorder}`,
         backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
@@ -447,24 +524,29 @@ function Settings({ t }) {
           <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 13, fontWeight: 600, marginTop: 2 }}>26 stories read · 12 favorites</div>
         </div>
       </div>
-      {/* settings list */}
       <div style={{
         background: t.glass, border: `1px solid ${t.glassBorder}`,
         backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
         borderRadius: 22, overflow: 'hidden',
       }}>
         {rows.map((r, i) => (
-          <div key={r.title} style={{
-            display: 'flex', alignItems: 'center', padding: '14px 16px', gap: 14,
-            borderBottom: i < rows.length - 1 ? `1px solid ${t.glassBorder}` : 'none',
-            color: t.text,
-          }}>
+          <div key={r.title}
+            onClick={r.onClick}
+            style={{
+              display: 'flex', alignItems: 'center', padding: '14px 16px', gap: 14,
+              borderBottom: i < rows.length - 1 ? `1px solid ${t.glassBorder}` : 'none',
+              color: t.text,
+              cursor: r.onClick ? 'pointer' : 'default',
+            }}>
             <div style={{ width: 36, height: 36, borderRadius: 10, background: t.accentSoft, color: t.accent,
               display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <Icon name={r.icon} size={18} stroke={2} />
             </div>
             <div style={{ flex: 1, fontFamily: t.fontBody, fontWeight: 600, fontSize: 15 }}>{r.title}</div>
-            <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 13, fontWeight: 500 }}>{r.detail}</div>
+            <div style={{
+              color: r.title === 'Gemini API key' && !apiConfigured ? '#f87171' : t.textMuted,
+              fontFamily: t.fontBody, fontSize: 13, fontWeight: 500,
+            }}>{r.detail}</div>
           </div>
         ))}
       </div>
@@ -472,17 +554,22 @@ function Settings({ t }) {
   );
 }
 
-// ─── Reader (full-screen overlay) ────────────────────────────
-function Reader({ t, story, onClose }) {
-  const [rating, setRating] = useState(0);
-  // Render body with {word} tokens highlighted
+// ─── Reader ───────────────────────────────────────────────────
+function Reader({ t, story, onClose, onRate, onDelete }) {
+  const [rating, setRating] = useState(story.rating || 0);
+  const isSeed = (window.SW_SEEDS || []).some(s => s.id === story.id);
+
+  const handleRate = (n) => {
+    setRating(n);
+    if (onRate) onRate(story.id, n);
+  };
+
   const renderLine = (line, i) => {
     const parts = line.split(/(\{[^}]+\})/g);
     return (
       <p key={i} style={{
         margin: '0 0 1.1em', fontFamily: t.fontBody, fontWeight: 500,
-        fontSize: 22, lineHeight: 1.55,
-        color: '#fde68a', letterSpacing: -0.2,
+        fontSize: 22, lineHeight: 1.55, color: '#fde68a', letterSpacing: -0.2,
       }}>
         {parts.map((p, j) => {
           const m = p.match(/^\{(.+)\}$/);
@@ -499,7 +586,6 @@ function Reader({ t, story, onClose }) {
       background: 'radial-gradient(110% 90% at 50% -10%, #1e1b4b 0%, #050514 70%)',
       display: 'flex', flexDirection: 'column',
     }}>
-      {/* close */}
       <button onClick={onClose} style={{
         position: 'absolute', top: 64, right: 20, zIndex: 5,
         width: 40, height: 40, borderRadius: 999,
@@ -510,12 +596,19 @@ function Reader({ t, story, onClose }) {
       }}><Icon name="close" size={18} stroke={2.5} /></button>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '60px 28px 40px' }}>
-        {/* Hero cover (small banner) */}
+        {/* Hero cover */}
         <div style={{ marginTop: 36, marginBottom: 28, display: 'flex', justifyContent: 'center' }}>
-          <Cover story={story} mode={t.coverMode} w={200} h={260} radius={20} />
+          {story.coverImage ? (
+            <img src={story.coverImage} alt="" style={{
+              width: 200, height: 260, borderRadius: 20, objectFit: 'cover',
+              boxShadow: '0 12px 36px rgba(0,0,0,0.55)',
+            }} />
+          ) : (
+            <Cover story={story} mode={t.coverMode} w={200} h={260} radius={20} />
+          )}
         </div>
 
-        {/* meta */}
+        {/* Meta */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>
           <div style={{ color: '#fbbf24', fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 8 }}>{story.category}</div>
           <h1 style={{
@@ -524,12 +617,12 @@ function Reader({ t, story, onClose }) {
           }}>{story.title}</h1>
         </div>
 
-        {/* body */}
+        {/* Body */}
         <div style={{ maxWidth: 360 }}>
           {story.body.map(renderLine)}
         </div>
 
-        {/* rating */}
+        {/* Rating */}
         <div style={{ marginTop: 40, padding: '20px 16px', textAlign: 'center',
           background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
           borderRadius: 20,
@@ -537,7 +630,7 @@ function Reader({ t, story, onClose }) {
           <div style={{ color: '#fde68a', fontFamily: t.fontBody, fontWeight: 700, fontSize: 14, marginBottom: 14 }}>How was tonight's story?</div>
           <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
             {[1, 2, 3, 4, 5].map(n => (
-              <button key={n} onClick={() => setRating(n)} style={{
+              <button key={n} onClick={() => handleRate(n)} style={{
                 background: 'transparent', border: 'none', cursor: 'pointer', padding: 4,
                 color: n <= rating ? '#fbbf24' : 'rgba(254,243,199,0.25)',
                 transform: n <= rating ? 'scale(1.05)' : 'scale(1)',
@@ -546,27 +639,61 @@ function Reader({ t, story, onClose }) {
             ))}
           </div>
         </div>
+
+        {/* Delete (non-seeds only) */}
+        {!isSeed && onDelete && (
+          <div style={{ marginTop: 20, textAlign: 'center' }}>
+            <button onClick={() => onDelete(story.id)} style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'rgba(248,113,113,0.55)', fontFamily: t.fontBody, fontWeight: 600, fontSize: 13,
+              padding: '8px 16px',
+            }}>Delete story</button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// ─── Weaving (loading) screen ────────────────────────────────
-function Weaving({ t, context, vocab = [] }) {
-  // 3 orbiting glyphs + breathing center sigil. Pure CSS, no JS animation.
+// ─── Weaving (loading / error) ────────────────────────────────
+function Weaving({ t, error }) {
   const steps = [
     'Gathering moonlight',
     'Calling the characters',
     'Sprinkling vocabulary',
     'Stitching it together',
   ];
+
+  const container = {
+    position: 'absolute', inset: 0, zIndex: 90,
+    background: 'radial-gradient(90% 70% at 50% 30%, #1e1b4b 0%, #050514 80%)',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    padding: '60px 32px 100px', overflow: 'hidden',
+  };
+
+  if (error) {
+    return (
+      <div style={container}>
+        <div style={{
+          background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239,68,68,0.3)',
+          borderRadius: 24, padding: 32, textAlign: 'center', maxWidth: 320,
+          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        }}>
+          <div style={{ fontSize: 40, marginBottom: 14, color: '#fca5a5' }}>✦</div>
+          <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 20, color: '#fca5a5', marginBottom: 10 }}>
+            Story couldn't be woven
+          </div>
+          <div style={{ fontFamily: t.fontBody, fontSize: 14, color: t.textMuted, lineHeight: 1.55 }}>{error}</div>
+          <div style={{ marginTop: 14, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12 }}>
+            Returning to create…
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div style={{
-      position: 'absolute', inset: 0, zIndex: 90,
-      background: 'radial-gradient(90% 70% at 50% 30%, #1e1b4b 0%, #050514 80%)',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      padding: '60px 32px 100px', overflow: 'hidden',
-    }}>
+    <div style={container}>
       <style>{`
         @keyframes sw-orbit { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
         @keyframes sw-orbit-r { from { transform: rotate(360deg) } to { transform: rotate(0deg) } }
@@ -575,16 +702,11 @@ function Weaving({ t, context, vocab = [] }) {
         @keyframes sw-step { 0%,25%{opacity:.3} 35%,100%{opacity:1} }
       `}</style>
 
-      {/* orbit ring (decorative dashed circle) */}
       <div style={{ position: 'relative', width: 220, height: 220, marginBottom: 44 }}>
         <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `1px dashed ${t.accent}55`, animation: 'sw-orbit 24s linear infinite' }} />
         <div style={{ position: 'absolute', inset: 28, borderRadius: '50%', border: `1px dashed ${t.accent}33`, animation: 'sw-orbit-r 16s linear infinite' }} />
-
-        {/* orbiting sparks */}
         {[0, 120, 240].map((deg, i) => (
-          <div key={i} style={{
-            position: 'absolute', inset: 0, animation: `sw-orbit ${10 + i * 4}s linear infinite`,
-          }}>
+          <div key={i} style={{ position: 'absolute', inset: 0, animation: `sw-orbit ${10 + i * 4}s linear infinite` }}>
             <div style={{
               position: 'absolute', top: -6, left: '50%', marginLeft: -6, width: 12, height: 12,
               borderRadius: 999, background: t.accent,
@@ -593,8 +715,6 @@ function Weaving({ t, context, vocab = [] }) {
             }} />
           </div>
         ))}
-
-        {/* center moon sigil */}
         <div style={{
           position: 'absolute', inset: 56, borderRadius: '50%',
           background: `radial-gradient(circle at 35% 35%, #fde68a, ${t.accent} 70%)`,
@@ -622,4 +742,241 @@ function Weaving({ t, context, vocab = [] }) {
   );
 }
 
-Object.assign(window, { Library, Creator, Settings, Reader, Weaving, BottomNav });
+// ─── ApiKeyModal ──────────────────────────────────────────────
+function ApiKeyModal({ t, open, onClose }) {
+  const [value,    setValue]    = useState(() => window.SW.getApiKey());
+  const [checking, setChecking] = useState(false);
+  const [error,    setError]    = useState('');
+
+  if (!open) return null;
+
+  const handleSave = async () => {
+    const k = value.trim();
+    if (!k) return;
+    setChecking(true);
+    setError('');
+    try {
+      const ok = await window.SW.validateApiKey(k);
+      if (ok) { window.SW.setApiKey(k); onClose(); }
+      else    { setError("That key didn't work — double-check it."); }
+    } catch   { setError("That key didn't work — double-check it."); }
+    finally   { setChecking(false); }
+  };
+
+  const fieldBox = {
+    background: t.glass, border: `1px solid ${t.glassBorder}`,
+    backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+    borderRadius: 18, padding: '14px 16px',
+  };
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 200,
+      background: 'rgba(2, 6, 23, 0.88)',
+      backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      padding: '24px 20px',
+    }}>
+      <button onClick={onClose} style={{
+        position: 'absolute', top: 64, right: 20,
+        width: 40, height: 40, borderRadius: 999,
+        background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+        color: t.text, cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}><Icon name="close" size={18} stroke={2.5} /></button>
+
+      <div style={{
+        width: '100%', maxWidth: 380,
+        background: 'rgba(12, 9, 36, 0.92)',
+        border: `1px solid ${t.glassBorder}`,
+        borderRadius: 24, padding: 24,
+      }}>
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 22, color: t.text, marginBottom: 10 }}>
+            Gemini API Key
+          </div>
+          <div style={{ fontFamily: t.fontBody, fontSize: 14, color: t.textMuted, lineHeight: 1.55 }}>
+            Needed to weave AI stories. Get a free key at{' '}
+            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"
+               style={{ color: t.accent, fontWeight: 700, textDecoration: 'none' }}>
+              aistudio.google.com/apikey
+            </a>
+          </div>
+        </div>
+
+        <div style={fieldBox}>
+          <input
+            type="password"
+            value={value}
+            onChange={(e) => { setValue(e.target.value); setError(''); }}
+            placeholder="Paste your API key…"
+            style={{
+              width: '100%', border: 'none', outline: 'none', background: 'transparent',
+              color: t.text, fontFamily: t.fontBody, fontSize: 15, fontWeight: 500,
+            }}
+          />
+        </div>
+
+        {error && (
+          <div style={{ marginTop: 10, color: '#f87171', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600 }}>
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={handleSave}
+          disabled={checking || !value.trim()}
+          style={{
+            marginTop: 16, width: '100%', border: 'none',
+            cursor: checking || !value.trim() ? 'default' : 'pointer',
+            padding: '16px 24px', borderRadius: 18,
+            background: checking || !value.trim()
+              ? 'rgba(251,191,36,0.25)'
+              : `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})`,
+            color: checking || !value.trim() ? t.textMuted : '#1a0a3e',
+            fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 17,
+          }}
+        >
+          {checking ? 'Checking…' : 'Save Key'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── AddLinkModal ─────────────────────────────────────────────
+const SCENES_LIST = ['moon','fox','unicorn','whale','dragon','bear','cloud','turtle'];
+const PALETTE_PRESETS = [
+  ['#0f172a','#312e81','#fbbf24'],
+  ['#0c4a6e','#0ea5e9','#e0f2fe'],
+  ['#831843','#ec4899','#fce7f3'],
+  ['#064e3b','#10b981','#ecfdf5'],
+  ['#7c2d12','#ea580c','#fef3c7'],
+];
+
+function AddLinkModal({ t, open, onClose, onSave, item }) {
+  const [url,     setUrl]     = useState(item?.url     || '');
+  const [title,   setTitle]   = useState(item?.title   || '');
+  const [scene,   setScene]   = useState(item?.scene   || 'moon');
+  const [palette, setPalette] = useState(item?.palette || PALETTE_PRESETS[0]);
+
+  useEffect(() => {
+    setUrl    (item?.url     || '');
+    setTitle  (item?.title   || '');
+    setScene  (item?.scene   || 'moon');
+    setPalette(item?.palette || PALETTE_PRESETS[0]);
+  }, [item]);
+
+  if (!open) return null;
+
+  const canSave = url.trim() && title.trim();
+
+  const fieldBox = {
+    background: t.glass, border: `1px solid ${t.glassBorder}`,
+    backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+    borderRadius: 18, padding: '12px 16px', marginBottom: 12,
+  };
+  const labelStyle = {
+    fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 1.5,
+    textTransform: 'uppercase', color: t.textMuted, marginBottom: 8, display: 'block',
+  };
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 200,
+      background: 'rgba(2, 6, 23, 0.88)',
+      backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+      overflowY: 'auto',
+    }}>
+      <div style={{ padding: '72px 20px 120px', maxWidth: 440, margin: '0 auto' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+          <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 22, color: t.text }}>
+            {item ? 'Edit Storybook' : 'Link a Storybook'}
+          </div>
+          <button onClick={onClose} style={{
+            width: 40, height: 40, borderRadius: 999,
+            background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+            color: t.text, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}><Icon name="close" size={18} stroke={2.5} /></button>
+        </div>
+
+        {/* URL */}
+        <div style={fieldBox}>
+          <label style={labelStyle}>Gemini URL</label>
+          <input type="url" value={url} onChange={(e) => setUrl(e.target.value)}
+            placeholder="g.co/gemini/share/…"
+            style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent',
+              color: t.text, fontFamily: t.fontBody, fontSize: 15, fontWeight: 500 }} />
+        </div>
+
+        {/* Title */}
+        <div style={fieldBox}>
+          <label style={labelStyle}>Title</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)}
+            placeholder="Story title…"
+            style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent',
+              color: t.text, fontFamily: t.fontBody, fontSize: 15, fontWeight: 500 }} />
+        </div>
+
+        {/* Scene chips */}
+        <div style={{ ...fieldBox, padding: '14px 16px' }}>
+          <label style={labelStyle}>Scene</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {SCENES_LIST.map(s => (
+              <button key={s} onClick={() => setScene(s)} style={{
+                padding: '6px 14px', borderRadius: 999, cursor: 'pointer',
+                background: scene === s ? t.accent : t.glass,
+                color: scene === s ? '#1a0a3e' : t.textMuted,
+                border: scene === s ? 'none' : `1px solid ${t.glassBorder}`,
+                fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+                textTransform: 'capitalize',
+              }}>{s}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Palette swatches */}
+        <div style={{ ...fieldBox, padding: '14px 16px' }}>
+          <label style={labelStyle}>Palette</label>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {PALETTE_PRESETS.map((p, i) => (
+              <button key={i} onClick={() => setPalette(p)} style={{
+                width: 36, height: 36, borderRadius: 12, border: 'none', cursor: 'pointer',
+                background: `linear-gradient(135deg, ${p[0]} 0%, ${p[1]} 60%, ${p[2]} 100%)`,
+                outline: JSON.stringify(palette) === JSON.stringify(p) ? `3px solid ${t.accent}` : 'none',
+                outlineOffset: 2,
+              }} />
+            ))}
+          </div>
+        </div>
+
+        {/* Cover preview */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
+          <Cover
+            story={{ scene, palette, type: 'link', title: title || 'Preview' }}
+            mode="glow" w={110} h={148} radius={16} badge={true}
+          />
+        </div>
+
+        {/* Save button */}
+        <button onClick={() => canSave && onSave({ url: url.trim(), title: title.trim(), scene, palette }, item?.id || null)}
+          disabled={!canSave}
+          style={{
+            width: '100%', border: 'none', cursor: canSave ? 'pointer' : 'default',
+            padding: '18px 24px', borderRadius: 18,
+            background: canSave
+              ? `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})`
+              : 'rgba(251,191,36,0.25)',
+            color: canSave ? '#1a0a3e' : t.textMuted,
+            fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 18,
+          }}>
+          {item ? 'Save Changes' : 'Add to Library'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { Library, Creator, Settings, Reader, Weaving, BottomNav, ApiKeyModal, AddLinkModal });
