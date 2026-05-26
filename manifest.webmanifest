@@ -1,0 +1,14 @@
+{
+  "name": "Story Weaver",
+  "short_name": "Stories",
+  "description": "AI bedtime stories woven just for tonight.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

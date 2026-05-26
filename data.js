@@ -1,0 +1,123 @@
+// Mock story data + procedurally generated covers.
+// Each story has a `palette` (3-stop gradient) and a `scene` keyword
+// rendered by <Cover> as a tiny CSS/SVG illustration.
+
+window.SW_STORIES = [
+  {
+    id: 'moon',
+    title: 'Sophie and the Sleepy Moon',
+    category: 'Bedtime',
+    rating: 5,
+    palette: ['#0f172a', '#312e81', '#fbbf24'],
+    scene: 'moon',
+    vocab: ['twinkling', 'whispered', 'gentle', 'brave'],
+    body: [
+      "Once upon a time, little Sophie looked out her window.",
+      "The night was quiet and full of {twinkling} stars.",
+      "'Where is the moon?' she {whispered}.",
+      "Suddenly, a {gentle} silver light appeared. It was the moon, looking sleepy and tired.",
+      "'I am so tired,' said the moon. 'I have shone all night long.'",
+      "Sophie smiled. 'Don't worry, Moon. You can rest. I will be {brave} and watch the sky for you.'",
+      "The moon yawned and slowly closed his eyes. Sophie watched as the sky filled with soft starlight.",
+      "'Goodnight, Moon,' she {whispered}. 'Sweet dreams.'",
+      "And then Sophie fell asleep too — the {brave}st little girl in all the land."
+    ],
+  },
+  {
+    id: 'fox',
+    title: 'The Brave Little Fox',
+    category: 'Animals',
+    rating: 4,
+    palette: ['#7c2d12', '#ea580c', '#fef3c7'],
+    scene: 'fox',
+    vocab: ['curious', 'rustling', 'bushy', 'forest'],
+    body: [
+      "In a deep, dark {forest} lived a {curious} little fox with a {bushy} red tail.",
+      "Every night she heard {rustling} sounds and wondered what they were.",
+      "'I will be brave,' she said, and tiptoed out under the stars.",
+    ],
+  },
+  {
+    id: 'unicorn',
+    title: 'Luna the Unicorn',
+    category: 'Magic',
+    rating: 5,
+    palette: ['#831843', '#ec4899', '#fce7f3'],
+    scene: 'unicorn',
+    vocab: ['shimmer', 'rainbow', 'magical', 'sparkle'],
+    body: [
+      "Luna the unicorn had a horn that would {shimmer} every time she smiled.",
+      "One {magical} morning she found a {rainbow} resting on the grass.",
+      "It began to {sparkle} brighter than ever before.",
+    ],
+  },
+  {
+    id: 'whale',
+    title: 'The Whale Who Sang to the Stars',
+    category: 'Adventure',
+    rating: 4,
+    palette: ['#0c4a6e', '#0ea5e9', '#e0f2fe'],
+    scene: 'whale',
+    vocab: ['ocean', 'enormous', 'gentle', 'songs'],
+    body: [
+      "Deep in the {ocean} swam an {enormous} blue whale.",
+      "Every night he sang {gentle} {songs} that floated all the way to the stars.",
+    ],
+  },
+  {
+    id: 'dragon',
+    title: 'The Tiny Dragon',
+    category: 'Adventure',
+    rating: 5,
+    palette: ['#365314', '#84cc16', '#fef9c3'],
+    scene: 'dragon',
+    vocab: ['hiccup', 'sparkly', 'cave', 'friend'],
+    body: [
+      "In a cozy {cave} on a mountain lived a tiny dragon named Pip.",
+      "When he hiccuped, tiny {sparkly} flames came out.",
+      "All he wanted was a {friend} to play with.",
+    ],
+  },
+  {
+    id: 'bear',
+    title: "Mr. Bear's Honey Hunt",
+    category: 'Animals',
+    rating: 4,
+    palette: ['#78350f', '#f59e0b', '#fef3c7'],
+    scene: 'bear',
+    vocab: ['honey', 'buzz', 'meadow', 'sticky'],
+    body: [
+      "Mr. Bear loved {honey} more than anything in the world.",
+      "One sunny day he wandered into a {meadow} and heard a happy {buzz}.",
+      "Soon his paws were very, very {sticky}!",
+    ],
+  },
+  {
+    id: 'cloud',
+    title: 'The Cloud That Forgot How to Float',
+    category: 'Bedtime',
+    rating: 5,
+    palette: ['#1e3a8a', '#60a5fa', '#f0f9ff'],
+    scene: 'cloud',
+    vocab: ['fluffy', 'breeze', 'gentle', 'sky'],
+    body: [
+      "High up in the {sky} lived a {fluffy} little cloud named Pebble.",
+      "One morning Pebble looked down and felt very heavy.",
+      "A {gentle} {breeze} came along and whispered, 'I'll help you.'",
+    ],
+  },
+  {
+    id: 'turtle',
+    title: 'Tilly the Turtle Finds a Star',
+    category: 'Friends',
+    rating: 5,
+    palette: ['#064e3b', '#10b981', '#ecfdf5'],
+    scene: 'turtle',
+    vocab: ['slowly', 'shell', 'wish', 'pond'],
+    body: [
+      "Tilly the turtle walked very {slowly} home to her {pond}.",
+      "On the way, a tiny star fell right onto her {shell}.",
+      "'Make a {wish},' the star whispered.",
+    ],
+  },
+];
