@@ -629,7 +629,7 @@ function Settings({ t, onOpenKeyModal, onNameChange }) {
   };
 
   const rows = [
-    { icon: 'wand',     title: 'Gemini API key',   detail: apiConfigured ? 'Configured' : 'Not set', onClick: onOpenKeyModal },
+    { icon: 'wand',     title: 'Gemini AI',        detail: apiConfigured ? 'Configured' : 'Not set', onClick: onOpenKeyModal },
     { icon: 'moon',     title: 'Reader theme',      detail: 'Warm dark' },
     { icon: 'book',     title: 'Reading font size', detail: 'Large' },
     { icon: 'sparkles', title: 'Magic level',       detail: 'Cozy' },
@@ -847,7 +847,7 @@ function Settings({ t, onOpenKeyModal, onNameChange }) {
             </div>
             <div style={{ flex: 1, fontFamily: t.fontBody, fontWeight: 600, fontSize: 15 }}>{r.title}</div>
             <div style={{
-              color: r.title === 'Gemini API key' && !apiConfigured ? '#f87171' : t.textMuted,
+              color: r.title === 'Gemini AI' && !apiConfigured ? '#f87171' : t.textMuted,
               fontFamily: t.fontBody, fontSize: 13, fontWeight: 500,
             }}>{r.detail}</div>
           </div>
@@ -1144,103 +1144,229 @@ function Weaving({ t, error, phase, onCancel, onSkipImage }) {
   );
 }
 
-// ─── ApiKeyModal ──────────────────────────────────────────────
+// ─── ApiKeyModal (AI Configuration) ──────────────────────────
 function ApiKeyModal({ t, open, onClose }) {
-  const [value,    setValue]    = useState(() => window.SW.getApiKey());
-  const [checking, setChecking] = useState(false);
-  const [error,    setError]    = useState('');
+  const [keyValue,    setKeyValue]    = useState(() => window.SW.getApiKey());
+  const [checking,    setChecking]    = useState(false);
+  const [keyError,    setKeyError]    = useState('');
+  const [keySaved,    setKeySaved]    = useState(false);
+
+  const [textModel,   setTextModelLocal]  = useState(() => window.SW.getTextModel());
+  const [imageModel,  setImageModelLocal] = useState(() => window.SW.getImageModel());
+
+  const [sysPrompt,   setSysPrompt]   = useState(() => window.SW.getCustomSystemPrompt());
+  const [promptSaved, setPromptSaved] = useState(false);
 
   if (!open) return null;
 
-  const handleSave = async () => {
-    const k = value.trim();
+  const handleSaveKey = async () => {
+    const k = keyValue.trim();
     if (!k) return;
     setChecking(true);
-    setError('');
+    setKeyError('');
+    setKeySaved(false);
     try {
       const ok = await window.SW.validateApiKey(k);
-      if (ok) { window.SW.setApiKey(k); onClose(); }
-      else    { setError("That key didn't work — double-check it."); }
-    } catch   { setError("That key didn't work — double-check it."); }
+      if (ok) { window.SW.setApiKey(k); setKeySaved(true); }
+      else    { setKeyError("That key didn't work — double-check it."); }
+    } catch   { setKeyError("That key didn't work — double-check it."); }
     finally   { setChecking(false); }
   };
 
+  const handleTextModelBlur = () => {
+    const val = textModel.trim();
+    if (val) window.SW.setTextModel(val);
+    else     setTextModelLocal(window.SW.getTextModel());
+  };
+
+  const handleImageModelBlur = () => {
+    const val = imageModel.trim();
+    if (val) window.SW.setImageModel(val);
+    else     setImageModelLocal(window.SW.getImageModel());
+  };
+
+  const handleLoadDefault = () => {
+    setSysPrompt(window.SW.getDefaultSystemPrompt());
+    setPromptSaved(false);
+  };
+
+  const handleClearPrompt = () => {
+    setSysPrompt('');
+    window.SW.setCustomSystemPrompt('');
+    setPromptSaved(true);
+    setTimeout(() => setPromptSaved(false), 2500);
+  };
+
+  const handleSavePrompt = () => {
+    window.SW.setCustomSystemPrompt(sysPrompt.trim());
+    setPromptSaved(true);
+    setTimeout(() => setPromptSaved(false), 2500);
+  };
+
+  const sectionLabel = {
+    fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 1.5,
+    textTransform: 'uppercase', color: t.textMuted, marginBottom: 12, display: 'block',
+  };
   const fieldBox = {
     background: t.glass, border: `1px solid ${t.glassBorder}`,
     backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-    borderRadius: 18, padding: '14px 16px',
+    borderRadius: 18, padding: 18, marginBottom: 14,
+  };
+  const monoInput = {
+    width: '100%', boxSizing: 'border-box',
+    border: `1px solid ${t.glassBorder}`, outline: 'none',
+    background: 'rgba(255,255,255,0.06)', borderRadius: 10,
+    color: t.text, fontFamily: 'monospace', fontSize: 13,
+    padding: '10px 12px', colorScheme: 'dark',
   };
 
   return (
     <div style={{
       position: 'absolute', inset: 0, zIndex: 200,
-      background: 'rgba(2, 6, 23, 0.88)',
+      background: 'rgba(2, 6, 23, 0.92)',
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      padding: '24px 20px',
+      overflowY: 'auto',
     }}>
-      <button onClick={onClose} style={{
-        position: 'absolute', top: 64, right: 20,
-        width: 40, height: 40, borderRadius: 999,
-        background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
-        color: t.text, cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}><Icon name="close" size={18} stroke={2.5} /></button>
+      <div style={{ padding: '72px 20px 120px', maxWidth: 480, margin: '0 auto' }}>
 
-      <div style={{
-        width: '100%', maxWidth: 380,
-        background: 'rgba(12, 9, 36, 0.92)',
-        border: `1px solid ${t.glassBorder}`,
-        borderRadius: 24, padding: 24,
-      }}>
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 22, color: t.text, marginBottom: 10 }}>
-            Gemini API Key
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28 }}>
+          <div>
+            <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontWeight: 600, fontSize: 13, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>Settings</div>
+            <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 24, color: t.text }}>AI Configuration</div>
           </div>
-          <div style={{ fontFamily: t.fontBody, fontSize: 14, color: t.textMuted, lineHeight: 1.55 }}>
+          <button onClick={onClose} style={{
+            width: 40, height: 40, borderRadius: 999, flexShrink: 0,
+            background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)',
+            color: t.text, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}><Icon name="close" size={18} stroke={2.5} /></button>
+        </div>
+
+        {/* ── API Key ── */}
+        <div style={fieldBox}>
+          <label style={sectionLabel}>Gemini API Key</label>
+          <div style={{ fontFamily: t.fontBody, fontSize: 13, color: t.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
             Needed to weave AI stories. Get a free key at{' '}
             <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"
-               style={{ color: t.accent, fontWeight: 700, textDecoration: 'none' }}>
-              aistudio.google.com/apikey
-            </a>
+               style={{ color: t.accent, fontWeight: 700, textDecoration: 'none' }}>aistudio.google.com/apikey</a>
           </div>
-        </div>
-
-        <div style={fieldBox}>
           <input
             type="password"
-            value={value}
-            onChange={(e) => { setValue(e.target.value); setError(''); }}
+            value={keyValue}
+            onChange={(e) => { setKeyValue(e.target.value); setKeyError(''); setKeySaved(false); }}
             placeholder="Paste your API key…"
-            style={{
-              width: '100%', border: 'none', outline: 'none', background: 'transparent',
-              color: t.text, fontFamily: t.fontBody, fontSize: 15, fontWeight: 500,
-            }}
+            style={{ ...monoInput, marginBottom: 10 }}
           />
+          {keyError && (
+            <div style={{ marginBottom: 8, color: '#f87171', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600 }}>{keyError}</div>
+          )}
+          {keySaved && (
+            <div style={{ marginBottom: 8, color: '#4ade80', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="check" size={14} stroke={2.5} /> Key saved
+            </div>
+          )}
+          <button
+            onClick={handleSaveKey}
+            disabled={checking || !keyValue.trim()}
+            style={{
+              width: '100%', border: 'none',
+              cursor: checking || !keyValue.trim() ? 'default' : 'pointer',
+              padding: '13px 24px', borderRadius: 12,
+              background: checking || !keyValue.trim()
+                ? 'rgba(251,191,36,0.2)'
+                : `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})`,
+              color: checking || !keyValue.trim() ? t.textMuted : '#1a0a3e',
+              fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
+            }}
+          >{checking ? 'Checking…' : 'Save Key'}</button>
         </div>
 
-        {error && (
-          <div style={{ marginTop: 10, color: '#f87171', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600 }}>
-            {error}
-          </div>
-        )}
+        {/* ── Models ── */}
+        <div style={fieldBox}>
+          <label style={sectionLabel}>AI Models</label>
 
-        <button
-          onClick={handleSave}
-          disabled={checking || !value.trim()}
-          style={{
-            marginTop: 16, width: '100%', border: 'none',
-            cursor: checking || !value.trim() ? 'default' : 'pointer',
-            padding: '16px 24px', borderRadius: 18,
-            background: checking || !value.trim()
-              ? 'rgba(251,191,36,0.25)'
-              : `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})`,
-            color: checking || !value.trim() ? t.textMuted : '#1a0a3e',
-            fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 17,
-          }}
-        >
-          {checking ? 'Checking…' : 'Save Key'}
-        </button>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 6 }}>Text generation</div>
+            <input
+              type="text"
+              value={textModel}
+              onChange={(e) => setTextModelLocal(e.target.value)}
+              onBlur={handleTextModelBlur}
+              style={monoInput}
+            />
+          </div>
+
+          <div>
+            <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 6 }}>Image generation</div>
+            <input
+              type="text"
+              value={imageModel}
+              onChange={(e) => setImageModelLocal(e.target.value)}
+              onBlur={handleImageModelBlur}
+              style={monoInput}
+            />
+          </div>
+
+          <div style={{ marginTop: 10, fontFamily: t.fontBody, fontSize: 11, color: t.textMuted, lineHeight: 1.5 }}>
+            Changes take effect on the next story generation.
+          </div>
+        </div>
+
+        {/* ── System Prompt ── */}
+        <div style={fieldBox}>
+          <label style={sectionLabel}>System Prompt</label>
+          <div style={{ fontFamily: t.fontBody, fontSize: 13, color: t.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
+            Override the storytelling instructions sent to Gemini. Leave blank to use the built-in dynamic prompt.
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <button onClick={handleLoadDefault} style={{
+              padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+              background: t.accentSoft, border: `1px solid ${t.accent}44`,
+              color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+            }}>Load default</button>
+            {sysPrompt.trim() && (
+              <button onClick={handleClearPrompt} style={{
+                padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                background: 'transparent', border: '1px solid rgba(248,113,113,0.35)',
+                color: '#f87171', fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+              }}>Clear override</button>
+            )}
+          </div>
+
+          <textarea
+            value={sysPrompt}
+            onChange={(e) => { setSysPrompt(e.target.value); setPromptSaved(false); }}
+            placeholder={"Leave blank to use the built-in prompt.\nClick 'Load default' to view and edit the current default prompt."}
+            rows={14}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              border: `1px solid ${t.glassBorder}`, outline: 'none',
+              background: 'rgba(255,255,255,0.04)', borderRadius: 10,
+              color: t.text, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.65,
+              padding: 12, resize: 'vertical', colorScheme: 'dark',
+            }}
+          />
+
+          {promptSaved && (
+            <div style={{ marginTop: 8, color: '#4ade80', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="check" size={14} stroke={2.5} /> {sysPrompt.trim() ? 'Prompt override saved' : 'Using built-in prompt'}
+            </div>
+          )}
+
+          <button
+            onClick={handleSavePrompt}
+            style={{
+              marginTop: 12, width: '100%',
+              border: `1px solid ${t.accent}44`, cursor: 'pointer',
+              padding: '13px 24px', borderRadius: 12,
+              background: t.accentSoft,
+              color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
+            }}
+          >{sysPrompt.trim() ? 'Save Prompt Override' : 'Save (use built-in)'}</button>
+        </div>
+
       </div>
     </div>
   );

@@ -114,6 +114,10 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 | `itemDelete(id)` | Delete an item from IndexedDB |
 | `mergeItems(persisted)` | Merge IndexedDB items with seeds (respects deleted seeds) |
 | `getApiKey() / setApiKey(k) / hasApiKey() / validateApiKey(k)` | Gemini API key via localStorage |
+| `getTextModel() / setTextModel(m)` | Text generation model (default `gemini-3.5-flash`) via localStorage `sw_text_model` |
+| `getImageModel() / setImageModel(m)` | Image generation model (default `gemini-3.1-flash-image-preview`) via localStorage `sw_image_model` |
+| `getCustomSystemPrompt() / setCustomSystemPrompt(s)` | Custom system prompt override via localStorage `sw_system_prompt`; empty string clears (uses built-in) |
+| `getDefaultSystemPrompt()` | Returns the built-in `buildSystemPrompt()` rendered with default form values and current child name — used by the UI to populate the prompt editor |
 | `getChildName() / setChildName(n)` | Child's name (default `'Sophie'`) via localStorage |
 | `getChildBirthday() / setChildBirthday(d)` | Birthday via localStorage |
 | `getSampleImage() / setSampleImage(url) / clearSampleImage()` | Reference photo (Settings upload) via localStorage |
@@ -137,9 +141,12 @@ Seeds are static and never stored in IndexedDB. Deleted seeds are tracked in `lo
 
 ### Models
 
+Models are user-configurable via Settings → Gemini AI (stored in localStorage):
+
 ```js
-const TEXT_MODEL  = "gemini-3.5-flash";           // JSON story generation
-const IMAGE_MODEL = "gemini-3.1-flash-image-preview"; // Cover illustration
+// Defaults (overridden by sw_text_model / sw_image_model in localStorage)
+const DEFAULT_TEXT_MODEL  = "gemini-3.5-flash";
+const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 ```
 
 ### Story Generation Flow (`weaveStory`)
@@ -147,9 +154,9 @@ const IMAGE_MODEL = "gemini-3.1-flash-image-preview"; // Cover illustration
 Generation is **sequential** (not parallel) to allow progressive feedback:
 
 1. **`onProgress('text', null)`** — signals text phase start
-2. **`textCall(form, existingIds, signal)`** — calls `gemini-3.5-flash` with `systemInstruction`, JSON schema response, and structured user prompt. Returns a parsed story object.
+2. **`textCall(form, existingIds, signal)`** — calls `getTextModel()` with `systemInstruction` (custom override or built-in `buildSystemPrompt()`), JSON schema response, and structured user prompt. Returns a parsed story object.
 3. **`onProgress('image', story)`** — signals image phase start (story text is ready; UI can offer "skip image")
-4. **`imageCall(form, signal)`** — calls `gemini-3.1-flash-image-preview` with a 45-second hard timeout. Uses Sophie's hardcoded photo (`window.SOPHIE_IMAGE`) as reference image; falls back to Settings upload (`getSampleImage()`), then no reference. Returns a WebP data URL or `null`.
+4. **`imageCall(form, signal)`** — calls `getImageModel()` with a 45-second hard timeout. Uses Sophie's hardcoded photo (`window.SOPHIE_IMAGE`) as reference image; falls back to Settings upload (`getSampleImage()`), then no reference. Returns a WebP data URL or `null`.
 5. Returns `{ ...story, type: 'story', coverImage, createdAt }`.
 
 ### Image API Payload (critical — do not change format)

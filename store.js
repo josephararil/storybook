@@ -1,8 +1,8 @@
 // StoryWeaver persistent store
 // Exports window.SW — must load after data.js, before cover.jsx / screens.jsx / app.jsx
 
-const TEXT_MODEL  = "gemini-3.5-flash";
-const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const DEFAULT_TEXT_MODEL  = "gemini-3.5-flash";
+const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
@@ -55,6 +55,19 @@ function itemDelete(id) {
 function getApiKey()  { return localStorage.getItem('sw_gemini_key') || ''; }
 function setApiKey(k) { localStorage.setItem('sw_gemini_key', k); }
 function hasApiKey()  { return !!localStorage.getItem('sw_gemini_key'); }
+
+// ─── Model helpers ────────────────────────────────────────────
+function getTextModel()   { return localStorage.getItem('sw_text_model')  || DEFAULT_TEXT_MODEL; }
+function setTextModel(m)  { localStorage.setItem('sw_text_model', m); }
+function getImageModel()  { return localStorage.getItem('sw_image_model') || DEFAULT_IMAGE_MODEL; }
+function setImageModel(m) { localStorage.setItem('sw_image_model', m); }
+
+// ─── Custom system prompt helpers ─────────────────────────────
+function getCustomSystemPrompt()  { return localStorage.getItem('sw_system_prompt') || ''; }
+function setCustomSystemPrompt(s) {
+  if (s) localStorage.setItem('sw_system_prompt', s);
+  else   localStorage.removeItem('sw_system_prompt');
+}
 
 // ─── GitHub Gist sync helpers ─────────────────────────────────
 function getGithubToken()   { return localStorage.getItem('sw_github_token') || ''; }
@@ -340,15 +353,23 @@ function buildSystemPrompt(form, childName, targetParas) {
   ].filter(s => s !== null && s !== undefined).join('\n');
 }
 
+function getDefaultSystemPrompt() {
+  return buildSystemPrompt(
+    { character: '', storyStyle: 'prose', tone: 3, length: 4 },
+    getChildName(),
+    6
+  );
+}
+
 async function textCall(form, existingIds, signal) {
   const toneWord    = TONE_WORDS[form.tone - 1];
   const childName   = getChildName();
   const targetParas = Math.max(4, Math.round(form.length / 0.65));
   const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
-  const sysPrompt   = buildSystemPrompt(form, childName, targetParas);
+  const sysPrompt   = getCustomSystemPrompt() || buildSystemPrompt(form, childName, targetParas);
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${getTextModel()}:generateContent`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
@@ -424,7 +445,7 @@ async function imageCall(form, signal) {
 
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${getImageModel()}:generateContent`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
@@ -464,6 +485,8 @@ async function weaveStory(form, existingIds, signal, onProgress) {
 window.SW = {
   dbOpen, itemsAll, itemPut, itemDelete,
   getApiKey, setApiKey, hasApiKey, validateApiKey,
+  getTextModel, setTextModel, getImageModel, setImageModel,
+  getCustomSystemPrompt, setCustomSystemPrompt, getDefaultSystemPrompt,
   getSeedRatings, saveSeedRating,
   getSeedDeletions, deleteSeed,
   getChildName, setChildName, getChildBirthday, setChildBirthday,
