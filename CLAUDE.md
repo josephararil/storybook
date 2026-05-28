@@ -48,7 +48,7 @@ data.js → sophie.js → store.js → cover.jsx → screens.jsx → app.jsx
 | `cover.jsx` | Procedural SVG story cover art; 8 scene types; 3 render modes |
 | `screens.jsx` | All app screens: Library, Creator, Settings, Reader, Weaving, ApiKeyModal, AddLinkModal; inline `Icon` component |
 | `app.jsx` | Root `StoryWeaverApp`; theme object; hash routing; lifted state; all event handlers |
-| `sw.js` | Service worker — cache-first for app shell, opportunistically caches CDN assets |
+| `sw.js` | Service worker — network-first for app files (updates always propagate), cache-first for CDN assets (pinned versions) |
 | `manifest.webmanifest` | PWA install metadata |
 
 ## Hash Routing
@@ -267,9 +267,9 @@ To update the photo: convert the new image to base64 JPEG and replace the `data`
 
 ## Service Worker Cache
 
-The cache is keyed `storyweaver-v2` in `sw.js`. Bump this string when you need to invalidate cached assets across existing installs.
+The cache is keyed `storyweaver-v3` in `sw.js`. Bump this string when you need to force-clear CDN caches on existing installs (app files are network-first and don't need a bump).
 
-**Local dev note:** the service worker aggressively caches script files. When testing uncommitted changes in the preview browser, unregister the SW and clear all caches first:
+**Local dev note:** app files are network-first so they always load fresh when online. CDN resources are still cached aggressively. If you need a completely clean slate, unregister the SW and clear caches:
 ```js
 (await navigator.serviceWorker.getRegistrations()).forEach(r => r.unregister());
 (await caches.keys()).forEach(k => caches.delete(k));
