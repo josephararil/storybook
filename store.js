@@ -310,46 +310,51 @@ function guessScene(context) {
 
 // ─── Gemini API calls ─────────────────────────────────────────
 function buildSystemPrompt(form, childName, targetParas) {
-  const characterLine = form.character?.trim()
-    ? `${childName} meets ${form.character.trim()} in this story. The meeting is warm and joyful.`
-    : '';
+  const toneWord = TONE_WORDS[(form.tone || 3) - 1];
 
-  const styleBlock = form.storyStyle === 'rhyme'
+  const companionLine = form.character?.trim()
+    ? `Companion: ${childName} meets ${form.character.trim()} in this story. The meeting is warm and joyful. No other characters.`
+    : `Companion: Exactly one friendly animal or magical creature. No other characters.`;
+
+  const sentenceRules = form.storyStyle === 'rhyme'
     ? [
-        'RHYME SCHEME: AABB rhyming couplets throughout — no exceptions.',
-        'Meter: approximately 8–10 syllables per line; aim for natural speech, not sing-songy.',
-        'Quality: every rhyme must be a TRUE rhyme (not slant/near). Common words children know.',
-        'Test: read each couplet aloud — if it stumbles, rewrite it before continuing.',
+        `RHYME SCHEME: AABB rhyming couplets throughout — no exceptions.`,
+        `Meter: approximately 8–10 syllables per line; aim for natural speech, not sing-songy.`,
+        `Quality: every rhyme must be a TRUE rhyme (not slant/near). Use common words a 4-year-old knows.`,
+        `Test: read each couplet aloud — if it stumbles, rewrite it.`,
       ].join(' ')
-    : [
-        'PROSE STYLE: short, clear sentences (8–12 words max). Present tense preferred.',
-        'Use concrete verbs and warm transitions. Never use "unfortunately", "suddenly", or "however".',
-      ].join(' ');
+    : `Sentence structure: Short, clear sentences (8–12 words max). Vary the rhythm so it sounds natural when read aloud. Use present tense.`;
+
+  // Middle exploration paragraphs fill the space between the fixed opening (2) and closing (2) beats.
+  const middleCount = Math.max(1, targetParas - 4);
 
   return [
-    `You write warm children's bedtime stories for 4-year-olds and return ONLY JSON matching the schema.`,
+    `You are an expert children's author writing warm, comforting bedtime stories for 4-year-olds. Return ONLY JSON matching the schema.`,
     ``,
-    `CHARACTER: The main character is ${childName} — imaginative, kind, brave, and always active in the story (never a bystander).`,
-    characterLine,
+    `[CHARACTER]`,
+    `Main character: ${childName}. Imaginative, brave, and active — she drives the action (investigates, helps, guides). Never a passive observer.`,
+    companionLine,
     ``,
-    `NARRATIVE ARC (${targetParas} paragraphs):`,
-    `• Paragraph 1 — Opening: ${childName} discovers something magical; curiosity not fear, warm atmosphere.`,
-    `• Middle paragraphs — Interaction & adventure: connection, exploration, a touch of wonder.`,
-    `• Second-to-last — Small climax or moment of tenderness: a gentle problem or shared realisation, never scary.`,
-    `• Last paragraph — Resolution: friendship, hope, and magic preserved. End on warmth.`,
+    `[TONE & STYLE]`,
+    `Tone: ${toneWord} — let this feeling permeate every sentence.`,
+    sentenceRules,
+    `Sensory details: weave in sounds (rustling leaves, soft hums), textures, and gentle glows. Focus on comfort, safety, and wonder.`,
+    `Restricted words: NEVER use "suddenly", "unfortunately", "however", "scary", or "dark". Avoid narrative clichés.`,
     ``,
-    `READING LEVEL: sentences max 8–12 words. Words a 4-year-old knows. Present tense preferred.`,
-    `AVOID: "suddenly", "unfortunately", "however", dark imagery, separation, sadness, scary elements.`,
-    `DO NOT introduce characters other than ${childName}${form.character?.trim() ? `, ${form.character.trim()},` : ''} and optionally one animal companion.`,
+    `[NARRATIVE ARC (${targetParas} paragraphs)]`,
+    `• Paragraph 1 — Discovery: ${childName} finds a magical element in a safe, familiar setting (e.g., her garden, her bedroom). Curiosity, not fear.`,
+    `• Paragraph 2 — Meeting: ${childName} introduces herself to her companion. They share a warm first moment.`,
+    `• Middle ${middleCount} paragraph(s) — Exploration & Interaction: ${childName} and companion actively explore, play, and collaborate using a gentle magical mechanic (e.g., floating on a cloud, tracing glowing paths). Deepen their connection across each paragraph.`,
+    `• Second-to-last paragraph — Comfort: A gentle transition toward rest. A soft problem is solved (e.g., finding a lost blanket, helping a star find its spot) or a quiet realisation is shared.`,
+    `• Last paragraph — Resolution: The companion settles down. ${childName} feels safe, loved, and sleepy. The magic remains safe for tomorrow. End on absolute warmth and peace.`,
     ``,
-    styleBlock,
+    `[VOCABULARY RULES]`,
+    `Every word in the vocabulary list MUST appear in body[] wrapped in curly braces exactly as given (e.g., {gentle}). Do not inflect, change tense, or pluralize inside the braces. List each word unbraced in vocab[].`,
     ``,
-    `VOCABULARY RULES: every word in the vocabulary list MUST appear in body[] wrapped in curly braces`,
-    `exactly as given (e.g. {gentle}) — do not inflect or pluralize inside braces. List each vocab word unbraced in vocab[].`,
-    ``,
-    `SCHEMA: scene ∈ {moon,fox,unicorn,whale,dragon,bear,cloud,turtle}. category ∈ {Bedtime,Animals,Magic,Adventure,Friends}.`,
+    `[SCHEMA]`,
+    `scene ∈ {moon,fox,unicorn,whale,dragon,bear,cloud,turtle}. category ∈ {Bedtime,Animals,Magic,Adventure,Friends}.`,
     `palette: exactly 3 #rrggbb colors (dark base, mid tone, light accent). id: kebab-case from title. rating: 0.`,
-    `Each body[] element is one paragraph of 40–60 words.`,
+    `Each body[] element is one paragraph of 40–60 words. Do not let the word count constraint make the prose repetitive.`,
   ].filter(s => s !== null && s !== undefined).join('\n');
 }
 
