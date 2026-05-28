@@ -23,7 +23,12 @@ function Icon({ name, size = 22, stroke = 2 }) {
     trash:    <><path d="M3 6h18" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /></>,
     pencil:   <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></>,
     cake:     <><path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8" /><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1" /><path d="M2 21h20" /><path d="M7 8v2" /><path d="M12 8v2" /><path d="M17 8v2" /><path d="M7 4h.01" /><path d="M12 4h.01" /><path d="M17 4h.01" /></>,
-    image:    <><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></>,
+    image:      <><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></>,
+    'cloud-up': <><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" /><path d="M12 12v9" /><path d="m8 17 4-5 4 5" /></>,
+    'cloud-dn': <><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" /><path d="M12 12v9" /><path d="m16 17-4 5-4-5" /></>,
+    eye:        <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></>,
+    'eye-off':  <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>,
+    check:      <><path d="M20 6L9 17l-5-5" /></>,
   };
   return <svg {...props}>{paths[name]}</svg>;
 }
@@ -561,11 +566,41 @@ function Slider({ t, value, min, max, onChange }) {
 
 // ─── Settings ─────────────────────────────────────────────────
 function Settings({ t, onOpenKeyModal }) {
-  const [childName, setChildNameLocal] = useState(() => window.SW?.getChildName() || 'Sophie');
-  const [birthday,  setBirthdayLocal]  = useState(() => window.SW?.getChildBirthday() || '');
-  const [sampleSet, setSampleSet]      = useState(() => !!window.SW?.getSampleImage());
+  const [childName,    setChildNameLocal] = useState(() => window.SW?.getChildName() || 'Sophie');
+  const [birthday,     setBirthdayLocal]  = useState(() => window.SW?.getChildBirthday() || '');
+  const [sampleSet,    setSampleSet]      = useState(() => !!window.SW?.getSampleImage());
+  const [githubToken,  setGithubTokenLocal] = useState(() => window.SW?.getGithubToken() || '');
+  const [gistId,       setGistIdLocal]    = useState(() => window.SW?.getGistId() || '');
+  const [showToken,    setShowToken]      = useState(false);
+  const [syncStatus,   setSyncStatus]     = useState(null); // null | {ok, msg} | {err, msg}
+  const [syncing,      setSyncing]        = useState(null); // null | 'push' | 'pull'
   const photoInputRef = useRef(null);
   const apiConfigured = window.SW?.hasApiKey();
+
+  const handlePush = async () => {
+    setSyncing('push');
+    setSyncStatus(null);
+    try {
+      const id = await window.SW.pushToGist();
+      setGistIdLocal(id);
+      setSyncStatus({ ok: true, msg: 'Saved to cloud.' });
+    } catch (e) {
+      setSyncStatus({ err: true, msg: e.message });
+    } finally {
+      setSyncing(null);
+    }
+  };
+
+  const handlePull = async () => {
+    setSyncing('pull');
+    setSyncStatus(null);
+    try {
+      await window.SW.pullFromGist(); // reloads on success
+    } catch (e) {
+      setSyncStatus({ err: true, msg: e.message });
+      setSyncing(null);
+    }
+  };
 
   const computeAge = (bd) => {
     if (!bd) return null;
@@ -690,6 +725,107 @@ function Settings({ t, onOpenKeyModal }) {
             color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
             padding: '6px 12px', borderRadius: 10, flexShrink: 0,
           }}>Upload</button>
+        )}
+      </div>
+
+      {/* Cloud Sync */}
+      <div style={{
+        background: t.glass, border: `1px solid ${t.glassBorder}`,
+        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        borderRadius: 22, padding: 20, marginBottom: 18,
+      }}>
+        <div style={{ fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', color: t.textMuted, marginBottom: 14 }}>Cloud Sync</div>
+
+        {/* GitHub token */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 4 }}>GitHub Token</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input
+              type={showToken ? 'text' : 'password'}
+              placeholder="ghp_xxxxxxxxxxxx"
+              value={githubToken}
+              onChange={(e) => { setGithubTokenLocal(e.target.value); window.SW?.setGithubToken(e.target.value); }}
+              style={{
+                flex: 1, border: `1px solid ${t.glassBorder}`, outline: 'none',
+                background: 'rgba(255,255,255,0.06)', borderRadius: 10,
+                color: t.text, fontFamily: 'monospace', fontSize: 13,
+                padding: '8px 12px', colorScheme: 'dark',
+              }}
+            />
+            <button onClick={() => setShowToken(v => !v)} style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: t.textMuted, padding: 4, display: 'flex', alignItems: 'center',
+            }}>
+              <Icon name={showToken ? 'eye-off' : 'eye'} size={16} stroke={2} />
+            </button>
+          </div>
+        </div>
+
+        {/* Gist ID */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 4 }}>Gist ID <span style={{ fontWeight: 400, opacity: 0.6 }}>(leave blank to auto-generate)</span></div>
+          <input
+            type="text"
+            placeholder="Auto-generated on first push"
+            value={gistId}
+            onChange={(e) => { setGistIdLocal(e.target.value); window.SW?.setGistId(e.target.value); }}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              border: `1px solid ${t.glassBorder}`, outline: 'none',
+              background: 'rgba(255,255,255,0.06)', borderRadius: 10,
+              color: t.text, fontFamily: 'monospace', fontSize: 13,
+              padding: '8px 12px', colorScheme: 'dark',
+            }}
+          />
+        </div>
+
+        {/* Buttons */}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button
+            onClick={handlePush}
+            disabled={!!syncing}
+            style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+              padding: '11px 0', borderRadius: 12,
+              background: syncing === 'push' ? t.accentSoft : t.accentSoft,
+              border: `1px solid ${t.accent}55`,
+              color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
+              cursor: syncing ? 'default' : 'pointer', opacity: syncing && syncing !== 'push' ? 0.45 : 1,
+            }}
+          >
+            <Icon name="cloud-up" size={15} stroke={2} />
+            {syncing === 'push' ? 'Saving…' : 'Store in Cloud'}
+          </button>
+          <button
+            onClick={handlePull}
+            disabled={!!syncing}
+            style={{
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+              padding: '11px 0', borderRadius: 12,
+              background: 'rgba(255,255,255,0.05)',
+              border: `1px solid ${t.glassBorder}`,
+              color: t.text, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
+              cursor: syncing ? 'default' : 'pointer', opacity: syncing && syncing !== 'pull' ? 0.45 : 1,
+            }}
+          >
+            <Icon name="cloud-dn" size={15} stroke={2} />
+            {syncing === 'pull' ? 'Retrieving…' : 'Retrieve from Cloud'}
+          </button>
+        </div>
+
+        {/* Status */}
+        {syncStatus && (
+          <div style={{
+            marginTop: 12, padding: '9px 12px', borderRadius: 10,
+            background: syncStatus.ok ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)',
+            border: `1px solid ${syncStatus.ok ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)'}`,
+            color: syncStatus.ok ? '#4ade80' : '#f87171',
+            fontFamily: t.fontBody, fontSize: 13, fontWeight: 600,
+            display: 'flex', alignItems: 'center', gap: 7,
+          }}>
+            {syncStatus.ok && <Icon name="check" size={14} stroke={2.5} />}
+            {syncStatus.msg}
+          </div>
         )}
       </div>
 

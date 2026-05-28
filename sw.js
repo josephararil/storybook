@@ -1,7 +1,7 @@
 // Story Weaver — minimal offline cache service worker.
 // Cache-first for app shell, network-fallback for everything else.
 
-const CACHE = 'storyweaver-v1';
+const CACHE = 'storyweaver-v2';
 const ASSETS = [
   './',
   './index.html',
