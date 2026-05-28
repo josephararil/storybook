@@ -142,10 +142,9 @@ function BottomNav({ t, tab, onChange }) {
 }
 
 // ─── Library ──────────────────────────────────────────────────
-function Library({ t, items, onOpen, onDelete, onEditLink, onRate }) {
+function Library({ t, items, onOpen, onDelete, onEditLink, onRate, childName }) {
   const [query,    setQuery]    = useState('');
   const [category, setCategory] = useState('All');
-  const childName = window.SW?.getChildName() || 'Sophie';
 
   const filtered = items.filter(s => {
     const matchQuery = !query ||
@@ -362,9 +361,8 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
 // ─── Creator ──────────────────────────────────────────────────
 const CHARACTER_PRESETS = ['Rapunzel', 'a friendly dragon', 'a talking fox', 'a magical mermaid', 'a cloud fairy', 'a baby unicorn'];
 
-function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, length, setLength, tone, setTone, storyStyle, setStoryStyle, character, setCharacter }) {
+function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, length, setLength, tone, setTone, storyStyle, setStoryStyle, character, setCharacter, childName }) {
   const [vocabInput, setVocabInput] = useState('');
-  const childName = window.SW?.getChildName() || 'Sophie';
 
   const addVocab = (e) => {
     if ((e.key === ',' || e.key === 'Enter' || e.key === ' ') && vocabInput.trim()) {
@@ -565,7 +563,7 @@ function Slider({ t, value, min, max, onChange }) {
 }
 
 // ─── Settings ─────────────────────────────────────────────────
-function Settings({ t, onOpenKeyModal }) {
+function Settings({ t, onOpenKeyModal, onNameChange }) {
   const [childName,    setChildNameLocal] = useState(() => window.SW?.getChildName() || 'Sophie');
   const [birthday,     setBirthdayLocal]  = useState(() => window.SW?.getChildBirthday() || '');
   const [sampleSet,    setSampleSet]      = useState(() => !!window.SW?.getSampleImage());
@@ -645,7 +643,7 @@ function Settings({ t, onOpenKeyModal }) {
         <input
           value={childName}
           onChange={(e) => setChildNameLocal(e.target.value)}
-          onBlur={() => window.SW?.setChildName(childName)}
+          onBlur={() => { window.SW?.setChildName(childName); onNameChange?.(childName); }}
           style={{
             display: 'block', width: '100%', border: 'none', outline: 'none', background: 'transparent',
             margin: '4px 0 0', fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,

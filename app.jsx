@@ -67,8 +67,16 @@ function StoryWeaverApp() {
       .catch(() => {/* keep seeds */});
   }, []);
 
+  // ─── Child name (lifted so all screens stay in sync) ─────
+  const [childName, setChildName] = React.useState(() => window.SW.getChildName());
+
+  const onNameChange = (name) => {
+    window.SW.setChildName(name);
+    setChildName(name);
+  };
+
   // ─── Lifted Creator form state ────────────────────────────
-  const [context,    setContext]    = React.useState("Sophie played in the garden today and found a lonely beetle.");
+  const [context,    setContext]    = React.useState(() => `${window.SW.getChildName()} played in the garden today and found a lonely beetle.`);
   const [vocab,      setVocab]      = React.useState(['curious', 'tiny', 'gentle']);
   const [length,     setLength]     = React.useState(4);
   const [tone,       setTone]       = React.useState(3);
@@ -232,7 +240,7 @@ function StoryWeaverApp() {
 
       <div style={{ position: 'absolute', inset: 0 }}>
         {tab === 'library'  && (
-          <Library t={theme} items={items} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} onRate={onRate} />
+          <Library t={theme} items={items} onOpen={onOpen} onDelete={onDelete} onEditLink={onEditLink} onRate={onRate} childName={childName} />
         )}
         {tab === 'create'   && (
           <Creator t={theme} onWeave={onWeave} onAddLink={onOpenAddLink}
@@ -241,10 +249,11 @@ function StoryWeaverApp() {
             length={length} setLength={setLength}
             tone={tone} setTone={setTone}
             storyStyle={storyStyle} setStoryStyle={setStoryStyle}
-            character={character} setCharacter={setCharacter} />
+            character={character} setCharacter={setCharacter}
+            childName={childName} />
         )}
         {tab === 'settings' && (
-          <Settings t={theme} onOpenKeyModal={() => setKeyModalOpen(true)} />
+          <Settings t={theme} onOpenKeyModal={() => setKeyModalOpen(true)} onNameChange={onNameChange} />
         )}
       </div>
 
