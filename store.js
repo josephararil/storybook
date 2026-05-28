@@ -56,6 +56,95 @@ function getApiKey()  { return localStorage.getItem('sw_gemini_key') || ''; }
 function setApiKey(k) { localStorage.setItem('sw_gemini_key', k); }
 function hasApiKey()  { return !!localStorage.getItem('sw_gemini_key'); }
 
+// ─── GitHub Gist sync helpers ─────────────────────────────────
+function getGithubToken()   { return localStorage.getItem('sw_github_token') || ''; }
+function setGithubToken(k)  { localStorage.setItem('sw_github_token', k); }
+function getGistId()        { return localStorage.getItem('sw_gist_id') || ''; }
+function setGistId(id)      { localStorage.setItem('sw_gist_id', id); }
+
+const GIST_EXCLUDED = new Set(['sw_gemini_key', 'sw_github_token']);
+const GIST_FILENAME = 'storyweaver-sync.json';
+
+async function pushToGist() {
+  const token = getGithubToken();
+  if (!token) throw new Error('GitHub token not set.');
+
+  const lsData = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!GIST_EXCLUDED.has(key)) lsData[key] = localStorage.getItem(key);
+  }
+
+  const idbItems = await itemsAll();
+  const payload  = JSON.stringify({ version: 1, localStorage: lsData, indexedDB: idbItems });
+
+  const gistId = getGistId();
+  const res = await fetch(
+    gistId ? `https://api.github.com/gists/${gistId}` : 'https://api.github.com/gists',
+    {
+      method: gistId ? 'PATCH' : 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: JSON.stringify({
+        description: 'StoryWeaver cloud sync',
+        public: false,
+        files: { [GIST_FILENAME]: { content: payload } },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `GitHub API error ${res.status}`);
+  }
+
+  const data = await res.json();
+  setGistId(data.id);
+  return data.id;
+}
+
+async function pullFromGist() {
+  const token  = getGithubToken();
+  const gistId = getGistId();
+  if (!token)  throw new Error('GitHub token not set.');
+  if (!gistId) throw new Error('Gist ID not set.');
+
+  const res = await fetch(`https://api.github.com/gists/${gistId}`, {
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `GitHub API error ${res.status}`);
+  }
+
+  const data    = await res.json();
+  const content = data.files?.[GIST_FILENAME]?.content;
+  if (!content) throw new Error('No StoryWeaver data found in this gist.');
+
+  const parsed = JSON.parse(content);
+
+  if (parsed.localStorage) {
+    for (const [key, value] of Object.entries(parsed.localStorage)) {
+      if (!GIST_EXCLUDED.has(key)) localStorage.setItem(key, value);
+    }
+  }
+
+  if (Array.isArray(parsed.indexedDB)) {
+    for (const item of parsed.indexedDB) await itemPut(item);
+  }
+
+  window.location.reload();
+}
+
 async function validateApiKey(k) {
   try {
     const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
@@ -381,4 +470,6 @@ window.SW = {
   getSampleImage, setSampleImage, clearSampleImage, compressImageForStorage,
   mergeItems, uniqueId, slugify,
   weaveStory,
+  getGithubToken, setGithubToken, getGistId, setGistId,
+  pushToGist, pullFromGist,
 };
