@@ -170,7 +170,25 @@ Adding `generationConfig: { responseModalities: [...] }` causes a ~5 minute hang
 
 ### System Prompt (`buildSystemPrompt`)
 
-Generated dynamically per request. Includes: CHARACTER block, NARRATIVE ARC (4-part structure), READING LEVEL rules, AVOID list, conditional STYLE BLOCK (prose or AABB rhyme), VOCABULARY RULES, and SCHEMA rules.
+Generated dynamically per request using a sectioned structure:
+
+| Section | Contents |
+|---|---|
+| `[CHARACTER]` | Dynamic child name; companion line (specific if `form.character` set, generic otherwise) |
+| `[TONE & STYLE]` | Dynamic tone word (Calming–Adventurous); prose sentence rules **or** AABB rhyme rules; sensory detail guidance; restricted words list |
+| `[NARRATIVE ARC]` | Dynamic paragraph count (`targetParas = max(4, round(length / 0.65))`); named beats: Discovery → Meeting → Exploration & Interaction (middle paragraphs, count = `targetParas − 4`) → Comfort → Resolution |
+| `[VOCABULARY RULES]` | `{word}` brace wrapping rules; unbraced in `vocab[]` |
+| `[SCHEMA]` | Valid enum values, palette format, id format, 40–60 word per paragraph constraint |
+
+If a custom system prompt is saved via the AI Configuration panel (`sw_system_prompt` in localStorage), it replaces the built-in entirely. `getDefaultSystemPrompt()` returns the built-in rendered with default form values and the current child name — used by the modal's "Load default" button.
+
+### AI Configuration Panel (`ApiKeyModal` component)
+
+Opened from Settings → **Gemini AI** row. A full-screen scrollable overlay with three sections:
+
+1. **API Key** — validates against Gemini's `/v1beta/models` endpoint before saving
+2. **AI Models** — editable text inputs for `getTextModel()` / `getImageModel()`; saves on blur
+3. **System Prompt** — textarea for `getCustomSystemPrompt()`; "Load default" button populates it with the current built-in prompt; "Clear override" removes the override; "Save Prompt Override" commits it. The custom prompt (if set) is included in Gist sync.
 
 ## Child Name
 
