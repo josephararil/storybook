@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**Always update this file when you make structural changes** — new files, new state, new API methods, new routing, changed data shapes — without waiting to be asked.
+
 ## Git & Deployment
 
 Git is fully configured. Push directly to `main` and merge without asking for confirmation — no PR required.
@@ -122,6 +124,10 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 | `uniqueId(base, existingIds)` | Generate a unique kebab-case ID |
 | `slugify(title)` | Convert title to kebab-case |
 | `weaveStory(form, existingIds, signal, onProgress)` | Full AI story generation (text then image) |
+| `getGithubToken() / setGithubToken(k)` | GitHub PAT for Gist sync via localStorage (`sw_github_token`) — excluded from sync |
+| `getGistId() / setGistId(id)` | Gist ID for cloud sync via localStorage (`sw_gist_id`) |
+| `pushToGist()` | Serialize localStorage (excluding API keys) + all IndexedDB items → create/update private Gist; auto-saves returned Gist ID |
+| `pullFromGist()` | Fetch Gist, restore localStorage keys and upsert IndexedDB items, then reload page |
 
 ### Seed Deletion Architecture
 
@@ -159,18 +165,24 @@ Adding `generationConfig: { responseModalities: [...] }` causes a ~5 minute hang
 
 Generated dynamically per request. Includes: CHARACTER block, NARRATIVE ARC (4-part structure), READING LEVEL rules, AVOID list, conditional STYLE BLOCK (prose or AABB rhyme), VOCABULARY RULES, and SCHEMA rules.
 
+## Child Name
+
+The child's name is stored in localStorage (`sw_child_name`, default `'Sophie'`) and lifted into `StoryWeaverApp` state as `childName`. It is passed as a prop to `Library`, `Creator`, and `Settings`. Changing the name in Settings calls `onNameChange` → updates both state and localStorage so all screens re-render with the new name without a page reload.
+
+Do **not** read `window.SW.getChildName()` directly inside screen components — use the `childName` prop instead.
+
 ## Creator Form
 
 The Creator screen lifts all form state into `app.jsx`:
 
 | State | Default | Description |
 |---|---|---|
-| `context` | `"Sophie played in the garden…"` | Today's context / seed for the story |
+| `context` | `"<childName> played in the garden…"` | Today's context / seed for the story |
 | `vocab` | `['curious','tiny','gentle']` | Vocabulary words to weave in |
 | `length` | `4` | Target minutes (2–8) |
 | `tone` | `3` | 1=Calming → 5=Adventurous |
 | `storyStyle` | `'prose'` | `'prose'` or `'rhyme'` (AABB couplets) |
-| `character` | `''` | Optional character Sophie meets; free text or preset chip |
+| `character` | `''` | Optional character the child meets; free text or preset chip |
 
 `CHARACTER_PRESETS` in `screens.jsx` = `['Rapunzel', 'a friendly dragon', 'a talking fox', 'a magical mermaid', 'a cloud fairy', 'a baby unicorn']`.
 
@@ -230,4 +242,12 @@ To update the photo: convert the new image to base64 JPEG and replace the `data`
 
 ## Service Worker Cache
 
-The cache is keyed `storyweaver-v1` in `sw.js`. Bump this string when you need to invalidate cached assets across existing installs.
+The cache is keyed `storyweaver-v2` in `sw.js`. Bump this string when you need to invalidate cached assets across existing installs.
+
+**Local dev note:** the service worker aggressively caches script files. When testing uncommitted changes in the preview browser, unregister the SW and clear all caches first:
+```js
+(await navigator.serviceWorker.getRegistrations()).forEach(r => r.unregister());
+(await caches.keys()).forEach(k => caches.delete(k));
+location.reload(true);
+```
+The preview tool only serves **committed** files — commit before verifying in the browser.
