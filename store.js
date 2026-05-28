@@ -2,7 +2,7 @@
 // Exports window.SW — must load after data.js, before cover.jsx / screens.jsx / app.jsx
 
 const TEXT_MODEL  = "gemini-2.5-flash";
-const IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation";
+const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
@@ -276,22 +276,27 @@ async function textCall(form, existingIds, signal) {
 
 async function imageCall(form, signal) {
   const toneWord    = TONE_WORDS[form.tone - 1];
+  const childName   = getChildName();
   const imagePrompt =
-    `A soft, dreamy children's picture-book cover illustration. ` +
-    `${form.context}. Mood: ${toneWord}, calming night-time palette. ` +
+    `Create a soft, dreamy children's picture-book cover illustration featuring ${childName}. ` +
+    `Scene: ${form.context}. Mood: ${toneWord}, calming night-time palette. ` +
     `Portrait orientation, no text or lettering in the image.`;
 
+  // Reference image: hardcoded Sophie photo takes priority, then the Settings upload.
+  const refImage = (() => {
+    if (window.SOPHIE_IMAGE?.data) return window.SOPHIE_IMAGE;
+    const s = getSampleImage();
+    if (!s) return null;
+    const m = s.match(/^data:(image\/[^;]+);base64,(.+)$/);
+    return m ? { mimeType: m[1], data: m[2] } : null;
+  })();
+
   const parts = [{ text: imagePrompt }];
+  if (refImage) parts.push({ inline_data: { mime_type: refImage.mimeType, data: refImage.data } });
 
-  const sampleImage = getSampleImage();
-  if (sampleImage) {
-    const match = sampleImage.match(/^data:(image\/[^;]+);base64,(.+)$/);
-    if (match) parts.push({ inline_data: { mime_type: match[1], data: match[2] } });
-  }
-
-  // Combine a 30-second hard timeout with the parent abort signal.
+  // Hard 45-second timeout; also respects the parent abort signal.
   const ctrl    = new AbortController();
-  const timerId = setTimeout(() => ctrl.abort(), 30000);
+  const timerId = setTimeout(() => ctrl.abort(), 45000);
   if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
 
   try {
@@ -301,10 +306,7 @@ async function imageCall(form, signal) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
         signal: ctrl.signal,
-        body: JSON.stringify({
-          contents: [{ role: 'user', parts }],
-          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-        }),
+        body: JSON.stringify({ contents: [{ parts }] }),
       }
     );
 
