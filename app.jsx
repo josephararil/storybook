@@ -74,10 +74,14 @@ function StoryWeaverApp() {
   const [tone,    setTone]    = React.useState(3);
 
   // ─── Overlay / modal state ────────────────────────────────
-  const [keyModalOpen, setKeyModalOpen] = React.useState(false);
-  const [addLinkOpen,  setAddLinkOpen]  = React.useState(false);
-  const [editingLink,  setEditingLink]  = React.useState(null);
-  const [weaveError,   setWeaveError]   = React.useState(null);
+  const [keyModalOpen,  setKeyModalOpen]  = React.useState(false);
+  const [addLinkOpen,   setAddLinkOpen]   = React.useState(false);
+  const [editingLink,   setEditingLink]   = React.useState(null);
+  const [weaveError,    setWeaveError]    = React.useState(null);
+  const [weavePhase,    setWeavePhase]    = React.useState(null);
+  const [weavingStory,  setWeavingStory]  = React.useState(null);
+  const abortRef         = React.useRef(null);
+  const ignoreWeaveRef   = React.useRef(false);
 
   // ─── Route parsing ────────────────────────────────────────
   const tab =
@@ -106,17 +110,57 @@ function StoryWeaverApp() {
 
   const onWeave = async (form) => {
     if (!window.SW.hasApiKey()) { setKeyModalOpen(true); return; }
+    ignoreWeaveRef.current = false;
     setWeaveError(null);
+    setWeavePhase(null);
+    setWeavingStory(null);
     navigate('/weaving');
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      const story = await window.SW.weaveStory(form, items.map(i => i.id));
+      const story = await window.SW.weaveStory(
+        form, items.map(i => i.id), controller.signal,
+        (phase, data) => {
+          if (ignoreWeaveRef.current) return;
+          setWeavePhase(phase);
+          if (phase === 'image' && data) setWeavingStory(data);
+        }
+      );
+      if (ignoreWeaveRef.current) return;
       await window.SW.itemPut(story);
       setItems(prev => [story, ...prev]);
       navigate('/story/' + story.id);
     } catch (err) {
+      if (ignoreWeaveRef.current) return;
+      if (err.name === 'AbortError') { navigate('/create'); return; }
       setWeaveError(err.message || 'Something went wrong weaving the story.');
-      setTimeout(() => { setWeaveError(null); navigate('/create'); }, 2800);
+      setTimeout(() => { setWeaveError(null); navigate('/create'); }, 4000);
+    } finally {
+      abortRef.current = null;
     }
+  };
+
+  const onCancelWeave = () => {
+    ignoreWeaveRef.current = true;
+    if (abortRef.current) abortRef.current.abort();
+    setWeavePhase(null);
+    setWeavingStory(null);
+    setWeaveError(null);
+    navigate('/create');
+  };
+
+  const onSkipImage = async () => {
+    const partial = weavingStory;
+    if (!partial) return;
+    ignoreWeaveRef.current = true;
+    const story = { ...partial, type: 'story', createdAt: Date.now() };
+    await window.SW.itemPut(story);
+    setItems(prev => [story, ...prev]);
+    setWeavingStory(null);
+    setWeavePhase(null);
+    navigate('/story/' + story.id);
   };
 
   const onSaveLink = async (data, editingId) => {
@@ -153,7 +197,12 @@ function StoryWeaverApp() {
   };
 
   const onDelete = async (id) => {
-    await window.SW.itemDelete(id);
+    const seedIds = new Set((window.SW_SEEDS || []).map(s => s.id));
+    if (seedIds.has(id)) {
+      window.SW.deleteSeed(id);
+    } else {
+      await window.SW.itemDelete(id);
+    }
     setItems(prev => prev.filter(i => i.id !== id));
     if (route.startsWith('/story/')) navigate('/');
   };
@@ -200,7 +249,7 @@ function StoryWeaverApp() {
       {openStory && (
         <Reader t={theme} story={openStory} onClose={() => navigate('/')} onRate={onRate} onDelete={onDelete} />
       )}
-      {isWeaving && <Weaving t={theme} error={weaveError} />}
+      {isWeaving && <Weaving t={theme} error={weaveError} phase={weavePhase} onCancel={onCancelWeave} onSkipImage={weavingStory ? onSkipImage : null} />}
 
       {keyModalOpen && (
         <ApiKeyModal t={theme} open={keyModalOpen} onClose={() => setKeyModalOpen(false)} />

@@ -230,7 +230,6 @@ function StoryMeta({ t, story, compact, onRate }) {
 
 // ─── Story card with overflow controls ───────────────────────
 function StoryCard({ t, item, onOpen, onDelete, onEditLink, onRate, coverH = 210 }) {
-  const isSeed = (window.SW_SEEDS || []).some(s => s.id === item.id);
   return (
     <div style={{ position: 'relative' }}>
       <button onClick={() => onOpen(item)} style={{
@@ -239,34 +238,32 @@ function StoryCard({ t, item, onOpen, onDelete, onEditLink, onRate, coverH = 210
         <Cover story={item} mode={t.coverMode} w="100%" h={coverH} radius={20} badge={item.type === 'link'} />
         <StoryMeta t={t} story={item} onRate={onRate} />
       </button>
-      {!isSeed && (
-        <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
-          {item.type === 'link' && onEditLink && (
-            <button onClick={(e) => { e.stopPropagation(); onEditLink(item); }} style={{
-              width: 30, height: 30, borderRadius: 999,
-              background: 'rgba(15, 12, 40, 0.78)',
-              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-              border: '1px solid rgba(255,255,255,0.18)',
-              color: '#fbbf24', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Icon name="pencil" size={13} stroke={2} />
-            </button>
-          )}
-          {onDelete && (
-            <button onClick={(e) => { e.stopPropagation(); onDelete(item.id); }} style={{
-              width: 30, height: 30, borderRadius: 999,
-              background: 'rgba(15, 12, 40, 0.78)',
-              backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
-              border: '1px solid rgba(255,255,255,0.18)',
-              color: 'rgba(254,243,199,0.55)', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <Icon name="trash" size={13} stroke={2} />
-            </button>
-          )}
-        </div>
-      )}
+      <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
+        {item.type === 'link' && onEditLink && (
+          <button onClick={(e) => { e.stopPropagation(); onEditLink(item); }} style={{
+            width: 30, height: 30, borderRadius: 999,
+            background: 'rgba(15, 12, 40, 0.78)',
+            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255,255,255,0.18)',
+            color: '#fbbf24', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon name="pencil" size={13} stroke={2} />
+          </button>
+        )}
+        {onDelete && (
+          <button onClick={(e) => { e.stopPropagation(); onDelete(item.id); }} style={{
+            width: 30, height: 30, borderRadius: 999,
+            background: 'rgba(15, 12, 40, 0.78)',
+            backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255,255,255,0.18)',
+            color: 'rgba(254,243,199,0.55)', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon name="trash" size={13} stroke={2} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -327,28 +324,26 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
             </div>
           </div>
         </button>
-        {!(window.SW_SEEDS || []).some(s => s.id === hero.id) && (
-          <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
-            {hero.type === 'link' && onEditLink && (
-              <button onClick={(e) => { e.stopPropagation(); onEditLink(hero); }} style={{
-                width: 30, height: 30, borderRadius: 999,
-                background: 'rgba(15,12,40,0.78)', backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255,255,255,0.18)',
-                color: '#fbbf24', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}><Icon name="pencil" size={13} stroke={2} /></button>
-            )}
-            {onDelete && (
-              <button onClick={(e) => { e.stopPropagation(); onDelete(hero.id); }} style={{
-                width: 30, height: 30, borderRadius: 999,
-                background: 'rgba(15,12,40,0.78)', backdropFilter: 'blur(8px)',
-                border: '1px solid rgba(255,255,255,0.18)',
-                color: 'rgba(254,243,199,0.55)', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}><Icon name="trash" size={13} stroke={2} /></button>
-            )}
-          </div>
-        )}
+        <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
+          {hero.type === 'link' && onEditLink && (
+            <button onClick={(e) => { e.stopPropagation(); onEditLink(hero); }} style={{
+              width: 30, height: 30, borderRadius: 999,
+              background: 'rgba(15,12,40,0.78)', backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              color: '#fbbf24', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}><Icon name="pencil" size={13} stroke={2} /></button>
+          )}
+          {onDelete && (
+            <button onClick={(e) => { e.stopPropagation(); onDelete(hero.id); }} style={{
+              width: 30, height: 30, borderRadius: 999,
+              background: 'rgba(15,12,40,0.78)', backdropFilter: 'blur(8px)',
+              border: '1px solid rgba(255,255,255,0.18)',
+              color: 'rgba(254,243,199,0.55)', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}><Icon name="trash" size={13} stroke={2} /></button>
+          )}
+        </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
         {rest.map(s => (
@@ -675,7 +670,6 @@ function Settings({ t, onOpenKeyModal }) {
 // ─── Reader ───────────────────────────────────────────────────
 function Reader({ t, story, onClose, onRate, onDelete }) {
   const [rating, setRating] = useState(story.rating || 0);
-  const isSeed = (window.SW_SEEDS || []).some(s => s.id === story.id);
 
   const handleRate = (n) => {
     setRating(n);
@@ -758,8 +752,7 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
           </div>
         </div>
 
-        {/* Delete (non-seeds only) */}
-        {!isSeed && onDelete && (
+        {onDelete && (
           <div style={{ marginTop: 20, textAlign: 'center' }}>
             <button onClick={() => onDelete(story.id)} style={{
               background: 'transparent', border: 'none', cursor: 'pointer',
@@ -774,14 +767,24 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
 }
 
 // ─── Weaving (loading / error) ────────────────────────────────
-function Weaving({ t, error }) {
+function Weaving({ t, error, phase, onCancel, onSkipImage }) {
   const childName = window.SW?.getChildName() || 'your child';
-  const steps = [
-    'Gathering moonlight',
-    'Calling the characters',
-    'Sprinkling vocabulary',
-    'Stitching it together',
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (error) return;
+    const start = Date.now();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 500);
+    return () => clearInterval(id);
+  }, [error]);
+
+  const phases = [
+    { key: 'text',  label: 'Writing your story' },
+    { key: 'image', label: 'Painting the cover'  },
   ];
+  const currentIdx = phases.findIndex(p => p.key === phase);
+  const getState   = (i) => i < currentIdx ? 'done' : i === currentIdx ? 'active' : 'pending';
+  const fmtElapsed = (s) => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 
   const container = {
     position: 'absolute', inset: 0, zIndex: 90,
@@ -814,13 +817,15 @@ function Weaving({ t, error }) {
   return (
     <div style={container}>
       <style>{`
-        @keyframes sw-orbit { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }
-        @keyframes sw-orbit-r { from { transform: rotate(360deg) } to { transform: rotate(0deg) } }
-        @keyframes sw-breathe { 0%,100% { transform: scale(1); opacity: 0.95 } 50% { transform: scale(1.08); opacity: 1 } }
-        @keyframes sw-twinkle { 0%,100% { opacity: 0.2 } 50% { opacity: 1 } }
-        @keyframes sw-step { 0%,25%{opacity:.3} 35%,100%{opacity:1} }
+        @keyframes sw-orbit   { from { transform: rotate(0deg)   } to { transform: rotate(360deg)  } }
+        @keyframes sw-orbit-r { from { transform: rotate(360deg) } to { transform: rotate(0deg)    } }
+        @keyframes sw-breathe { 0%,100% { transform: scale(1); opacity: .95 } 50% { transform: scale(1.08); opacity: 1 } }
+        @keyframes sw-twinkle { 0%,100% { opacity: .2 } 50% { opacity: 1 } }
+        @keyframes sw-spin    { from { transform: rotate(0deg)   } to { transform: rotate(360deg)  } }
+        @keyframes sw-fadein  { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
       `}</style>
 
+      {/* Animated orb */}
       <div style={{ position: 'relative', width: 220, height: 220, marginBottom: 44 }}>
         <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `1px dashed ${t.accent}55`, animation: 'sw-orbit 24s linear infinite' }} />
         <div style={{ position: 'absolute', inset: 28, borderRadius: '50%', border: `1px dashed ${t.accent}33`, animation: 'sw-orbit-r 16s linear infinite' }} />
@@ -848,14 +853,63 @@ function Weaving({ t, error }) {
           margin: 0, fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
           fontSize: 30, lineHeight: 1.15, color: t.text, letterSpacing: -0.5,
         }}>A new story for {childName}…</h1>
-        <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {steps.map((s, i) => (
-            <div key={s} style={{
-              color: t.textMuted, fontFamily: t.fontBody, fontWeight: 600, fontSize: 14,
-              animation: `sw-step ${1.4 + i * 0.6}s ease-out forwards`, opacity: 0,
-            }}>· {s}</div>
-          ))}
+
+        {/* Phase progress */}
+        <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
+          {phases.map((p, i) => {
+            const state = getState(i);
+            return (
+              <div key={p.key} style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                fontFamily: t.fontBody, fontWeight: 600, fontSize: 15,
+                color: state === 'done' ? t.textMuted : state === 'active' ? t.text : `${t.textMuted}44`,
+                animation: state === 'active' ? 'sw-fadein 0.4s ease-out forwards' : 'none',
+              }}>
+                {state === 'done' && <span style={{ color: '#4ade80', fontSize: 15, lineHeight: 1 }}>✓</span>}
+                {state === 'active' && (
+                  <div style={{
+                    width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
+                    border: `2px solid ${t.accent}`, borderTopColor: 'transparent',
+                    animation: 'sw-spin 0.75s linear infinite',
+                  }} />
+                )}
+                {state === 'pending' && <span style={{ fontSize: 13, opacity: 0.3 }}>·</span>}
+                {p.label}
+              </div>
+            );
+          })}
         </div>
+
+        {/* Elapsed time */}
+        {elapsed > 2 && (
+          <div style={{ marginTop: 16, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12, fontWeight: 500, opacity: 0.6 }}>
+            {fmtElapsed(elapsed)} elapsed
+          </div>
+        )}
+
+        {/* Skip image button — shown once we're in the image phase */}
+        {phase === 'image' && onSkipImage && (
+          <button onClick={onSkipImage} style={{
+            marginTop: 24, padding: '12px 26px', borderRadius: 14,
+            background: t.accentSoft, border: `1px solid ${t.accent}55`,
+            color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
+            cursor: 'pointer', animation: 'sw-fadein 0.5s ease-out forwards',
+          }}>
+            Skip image · Read now
+          </button>
+        )}
+
+        {/* Cancel button */}
+        {onCancel && (
+          <button onClick={onCancel} style={{
+            marginTop: phase === 'image' ? 10 : 28,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: t.textMuted, fontFamily: t.fontBody, fontSize: 13, fontWeight: 600,
+            padding: '8px 16px', opacity: 0.65,
+          }}>
+            Cancel
+          </button>
+        )}
       </div>
     </div>
   );

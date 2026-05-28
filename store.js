@@ -1,8 +1,8 @@
 // StoryWeaver persistent store
 // Exports window.SW — must load after data.js, before cover.jsx / screens.jsx / app.jsx
 
-const TEXT_MODEL  = "gemini-3.5-flash";
-const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const TEXT_MODEL  = "gemini-2.5-flash";
+const IMAGE_MODEL = "gemini-2.0-flash-preview-image-generation";
 
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
@@ -76,6 +76,19 @@ function saveSeedRating(id, n) {
   localStorage.setItem('sw_seed_ratings', JSON.stringify(r));
 }
 
+// ─── Seed deletion helpers ────────────────────────────────────
+function getSeedDeletions() {
+  try { return JSON.parse(localStorage.getItem('sw_deleted_seeds') || '[]'); }
+  catch { return []; }
+}
+function deleteSeed(id) {
+  const d = getSeedDeletions();
+  if (!d.includes(id)) {
+    d.push(id);
+    localStorage.setItem('sw_deleted_seeds', JSON.stringify(d));
+  }
+}
+
 // ─── Child profile helpers ────────────────────────────────────
 function getChildName()      { return localStorage.getItem('sw_child_name') || 'Sophie'; }
 function setChildName(n)     { localStorage.setItem('sw_child_name', n); }
@@ -117,15 +130,18 @@ function compressImageForStorage(file) {
 
 // ─── Merge persisted items + seeds ───────────────────────────
 function mergeItems(persisted) {
-  const ratings = getSeedRatings();
-  const seedIds = new Set((window.SW_SEEDS || []).map(s => s.id));
-  const nonSeed = persisted.filter(i => !seedIds.has(i.id));
-  const seeds   = (window.SW_SEEDS || []).map(s => ({
-    ...s,
-    type: 'story',
-    rating: ratings[s.id] !== undefined ? ratings[s.id] : s.rating,
-    createdAt: 0,
-  }));
+  const ratings  = getSeedRatings();
+  const deleted  = new Set(getSeedDeletions());
+  const seedIds  = new Set((window.SW_SEEDS || []).map(s => s.id));
+  const nonSeed  = persisted.filter(i => !seedIds.has(i.id));
+  const seeds    = (window.SW_SEEDS || [])
+    .filter(s => !deleted.has(s.id))
+    .map(s => ({
+      ...s,
+      type: 'story',
+      rating: ratings[s.id] !== undefined ? ratings[s.id] : s.rating,
+      createdAt: 0,
+    }));
   return [...nonSeed, ...seeds];
 }
 
@@ -191,7 +207,7 @@ function guessScene(context) {
 }
 
 // ─── Gemini API calls ─────────────────────────────────────────
-async function textCall(form, existingIds) {
+async function textCall(form, existingIds, signal) {
   const toneWord    = TONE_WORDS[form.tone - 1];
   const targetParas = Math.max(3, Math.round(form.length / 0.7));
   const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
@@ -201,6 +217,7 @@ async function textCall(form, existingIds) {
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
+      signal,
       body: JSON.stringify({
         systemInstruction: {
           parts: [{ text:
@@ -257,7 +274,7 @@ async function textCall(form, existingIds) {
   return story;
 }
 
-async function imageCall(form) {
+async function imageCall(form, signal) {
   const toneWord    = TONE_WORDS[form.tone - 1];
   const imagePrompt =
     `A soft, dreamy children's picture-book cover illustration. ` +
@@ -269,42 +286,52 @@ async function imageCall(form) {
   const sampleImage = getSampleImage();
   if (sampleImage) {
     const match = sampleImage.match(/^data:(image\/[^;]+);base64,(.+)$/);
-    if (match) {
-      parts.push({
-        inline_data: { mime_type: match[1], data: match[2] },
-      });
-    }
+    if (match) parts.push({ inline_data: { mime_type: match[1], data: match[2] } });
   }
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
-      }),
-    }
-  );
+  // Combine a 30-second hard timeout with the parent abort signal.
+  const ctrl    = new AbortController();
+  const timerId = setTimeout(() => ctrl.abort(), 30000);
+  if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
 
-  if (!res.ok) throw new Error('Image generation failed.');
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${IMAGE_MODEL}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts }],
+          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+        }),
+      }
+    );
 
-  const data    = await res.json();
-  const resParts = data?.candidates?.[0]?.content?.parts || [];
-  const imgPart  = resParts.find(p => p.inlineData || p.inline_data);
-  if (!imgPart) throw new Error('No image in response.');
+    if (!res.ok) throw new Error('Image generation failed.');
 
-  const inlineData = imgPart.inlineData || imgPart.inline_data;
-  return compressToWebp(inlineData.data);
+    const data     = await res.json();
+    const resParts = data?.candidates?.[0]?.content?.parts || [];
+    const imgPart  = resParts.find(p => p.inlineData || p.inline_data);
+    if (!imgPart) throw new Error('No image in response.');
+
+    const inlineData = imgPart.inlineData || imgPart.inline_data;
+    return compressToWebp(inlineData.data);
+  } finally {
+    clearTimeout(timerId);
+  }
 }
 
 // ─── Main weave entry point ───────────────────────────────────
-async function weaveStory(form, existingIds) {
-  const [story, image] = await Promise.all([
-    textCall(form, existingIds),
-    imageCall(form).catch(() => null),
-  ]);
+// onProgress(phase, storyData) — called with 'text' then 'image'.
+// storyData is populated on the 'image' call so callers can act on the text story early.
+async function weaveStory(form, existingIds, signal, onProgress) {
+  onProgress?.('text', null);
+  const story = await textCall(form, existingIds, signal);
+
+  onProgress?.('image', story);
+  const image = await imageCall(form, signal).catch(() => null);
+
   return { ...story, type: 'story', coverImage: image, createdAt: Date.now() };
 }
 
@@ -313,6 +340,7 @@ window.SW = {
   dbOpen, itemsAll, itemPut, itemDelete,
   getApiKey, setApiKey, hasApiKey, validateApiKey,
   getSeedRatings, saveSeedRating,
+  getSeedDeletions, deleteSeed,
   getChildName, setChildName, getChildBirthday, setChildBirthday,
   getSampleImage, setSampleImage, clearSampleImage, compressImageForStorage,
   mergeItems, uniqueId, slugify,
