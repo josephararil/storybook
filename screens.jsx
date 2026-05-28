@@ -355,8 +355,11 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
 }
 
 // ─── Creator ──────────────────────────────────────────────────
-function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, length, setLength, tone, setTone }) {
+const CHARACTER_PRESETS = ['Rapunzel', 'a friendly dragon', 'a talking fox', 'a magical mermaid', 'a cloud fairy', 'a baby unicorn'];
+
+function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, length, setLength, tone, setTone, storyStyle, setStoryStyle, character, setCharacter }) {
   const [vocabInput, setVocabInput] = useState('');
+  const childName = window.SW?.getChildName() || 'Sophie';
 
   const addVocab = (e) => {
     if ((e.key === ',' || e.key === 'Enter' || e.key === ' ') && vocabInput.trim()) {
@@ -422,6 +425,59 @@ function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, 
           }} />
         </div>
 
+        {/* Who does the child meet? */}
+        <div style={fieldBox}>
+          <label style={labelStyle}>Who does {childName} meet? <span style={{ fontWeight: 500, opacity: 0.45 }}>optional</span></label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+            {CHARACTER_PRESETS.map(c => {
+              const active = character === c;
+              return (
+                <button key={c} onClick={() => setCharacter(active ? '' : c)} style={{
+                  padding: '5px 11px', borderRadius: 999, cursor: 'pointer',
+                  background: active ? t.accentSoft : 'transparent',
+                  color: active ? t.accent : t.textMuted,
+                  border: active ? `1px solid ${t.accent}44` : `1px solid ${t.glassBorder}`,
+                  fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+                }}>{c}</button>
+              );
+            })}
+          </div>
+          <input
+            value={character}
+            onChange={(e) => setCharacter(e.target.value)}
+            placeholder="or type a character…"
+            style={{
+              width: '100%', border: 'none', outline: 'none', background: 'transparent',
+              color: t.text, fontFamily: t.fontBody, fontSize: 14, fontWeight: 500,
+              borderTop: `1px solid ${t.glassBorder}`, paddingTop: 10,
+            }}
+          />
+        </div>
+
+        {/* Story style */}
+        <div style={fieldBox}>
+          <label style={labelStyle}>Story style</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[
+              { key: 'prose', label: 'Prose',    sub: 'flowing narrative' },
+              { key: 'rhyme', label: 'Rhyming',  sub: 'AABB couplets'    },
+            ].map(s => {
+              const active = storyStyle === s.key;
+              return (
+                <button key={s.key} onClick={() => setStoryStyle(s.key)} style={{
+                  flex: 1, padding: '12px 10px', borderRadius: 14, cursor: 'pointer',
+                  background: active ? t.accentSoft : 'transparent',
+                  border: active ? `1px solid ${t.accent}44` : `1px solid ${t.glassBorder}`,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                }}>
+                  <span style={{ fontFamily: t.fontBody, fontWeight: 800, fontSize: 14, color: active ? t.accent : t.text }}>{s.label}</span>
+                  <span style={{ fontFamily: t.fontBody, fontSize: 10, color: t.textMuted, fontWeight: 600 }}>{s.sub}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Vocab tags */}
         <div style={fieldBox}>
           <label style={labelStyle}>Target vocabulary</label>
@@ -471,7 +527,7 @@ function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, 
         </div>
 
         {/* Weave button */}
-        <button onClick={() => onWeave && onWeave({ context, vocab, length, tone })} style={{
+        <button onClick={() => onWeave && onWeave({ context, vocab, length, tone, storyStyle, character })} style={{
           marginTop: 8, position: 'relative', border: 'none', cursor: 'pointer',
           padding: '20px 24px', borderRadius: t.navStyle === 'dock' ? 28 : 22,
           background: `linear-gradient(135deg, ${t.accent} 0%, ${tint(t.accent, -0.15)} 60%, #ec4899 130%)`,

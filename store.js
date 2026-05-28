@@ -207,10 +207,56 @@ function guessScene(context) {
 }
 
 // ─── Gemini API calls ─────────────────────────────────────────
+function buildSystemPrompt(form, childName, targetParas) {
+  const characterLine = form.character?.trim()
+    ? `${childName} meets ${form.character.trim()} in this story. The meeting is warm and joyful.`
+    : '';
+
+  const styleBlock = form.storyStyle === 'rhyme'
+    ? [
+        'RHYME SCHEME: AABB rhyming couplets throughout — no exceptions.',
+        'Meter: approximately 8–10 syllables per line; aim for natural speech, not sing-songy.',
+        'Quality: every rhyme must be a TRUE rhyme (not slant/near). Common words children know.',
+        'Test: read each couplet aloud — if it stumbles, rewrite it before continuing.',
+      ].join(' ')
+    : [
+        'PROSE STYLE: short, clear sentences (8–12 words max). Present tense preferred.',
+        'Use concrete verbs and warm transitions. Never use "unfortunately", "suddenly", or "however".',
+      ].join(' ');
+
+  return [
+    `You write warm children's bedtime stories for 4-year-olds and return ONLY JSON matching the schema.`,
+    ``,
+    `CHARACTER: The main character is ${childName} — imaginative, kind, brave, and always active in the story (never a bystander).`,
+    characterLine,
+    ``,
+    `NARRATIVE ARC (${targetParas} paragraphs):`,
+    `• Paragraph 1 — Opening: ${childName} discovers something magical; curiosity not fear, warm atmosphere.`,
+    `• Middle paragraphs — Interaction & adventure: connection, exploration, a touch of wonder.`,
+    `• Second-to-last — Small climax or moment of tenderness: a gentle problem or shared realisation, never scary.`,
+    `• Last paragraph — Resolution: friendship, hope, and magic preserved. End on warmth.`,
+    ``,
+    `READING LEVEL: sentences max 8–12 words. Words a 4-year-old knows. Present tense preferred.`,
+    `AVOID: "suddenly", "unfortunately", "however", dark imagery, separation, sadness, scary elements.`,
+    `DO NOT introduce characters other than ${childName}${form.character?.trim() ? `, ${form.character.trim()},` : ''} and optionally one animal companion.`,
+    ``,
+    styleBlock,
+    ``,
+    `VOCABULARY RULES: every word in the vocabulary list MUST appear in body[] wrapped in curly braces`,
+    `exactly as given (e.g. {gentle}) — do not inflect or pluralize inside braces. List each vocab word unbraced in vocab[].`,
+    ``,
+    `SCHEMA: scene ∈ {moon,fox,unicorn,whale,dragon,bear,cloud,turtle}. category ∈ {Bedtime,Animals,Magic,Adventure,Friends}.`,
+    `palette: exactly 3 #rrggbb colors (dark base, mid tone, light accent). id: kebab-case from title. rating: 0.`,
+    `Each body[] element is one paragraph of 40–60 words.`,
+  ].filter(s => s !== null && s !== undefined).join('\n');
+}
+
 async function textCall(form, existingIds, signal) {
   const toneWord    = TONE_WORDS[form.tone - 1];
-  const targetParas = Math.max(3, Math.round(form.length / 0.7));
+  const childName   = getChildName();
+  const targetParas = Math.max(4, Math.round(form.length / 0.65));
   const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
+  const sysPrompt   = buildSystemPrompt(form, childName, targetParas);
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${TEXT_MODEL}:generateContent`,
@@ -219,19 +265,7 @@ async function textCall(form, existingIds, signal) {
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
       signal,
       body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text:
-            "You write warm children's bedtime stories and return ONLY JSON matching the schema. " +
-            "RULES: every word in the provided vocabulary list MUST appear in `body[]` wrapped in " +
-            "curly braces exactly as given (e.g. `{gentle}`) — do not inflect, pluralize, or alter " +
-            "the word inside the braces; also list each vocab word, unbraced, in `vocab[]`. " +
-            "One short paragraph per `body[]` element. " +
-            "`scene` must be one of: moon, fox, unicorn, whale, dragon, bear, cloud, turtle. " +
-            "`category` must be one of: Bedtime, Animals, Magic, Adventure, Friends. " +
-            "`palette` is exactly three `#rrggbb` colors: dark base, mid tone, light accent. " +
-            "`id` is kebab-case from the title. `rating` is 0."
-          }],
-        },
+        systemInstruction: { parts: [{ text: sysPrompt }] },
         contents: [{
           role: 'user',
           parts: [{ text: `Context: ${form.context}\nTone: ${toneWord}\nTarget length: ~${targetParas} paragraphs${vocabStr}` }],

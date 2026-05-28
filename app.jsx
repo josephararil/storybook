@@ -68,10 +68,12 @@ function StoryWeaverApp() {
   }, []);
 
   // ─── Lifted Creator form state ────────────────────────────
-  const [context, setContext] = React.useState("Sophie played in the garden today and found a lonely beetle.");
-  const [vocab,   setVocab]   = React.useState(['curious', 'tiny', 'gentle']);
-  const [length,  setLength]  = React.useState(4);
-  const [tone,    setTone]    = React.useState(3);
+  const [context,    setContext]    = React.useState("Sophie played in the garden today and found a lonely beetle.");
+  const [vocab,      setVocab]      = React.useState(['curious', 'tiny', 'gentle']);
+  const [length,     setLength]     = React.useState(4);
+  const [tone,       setTone]       = React.useState(3);
+  const [storyStyle, setStoryStyle] = React.useState('prose');
+  const [character,  setCharacter]  = React.useState('');
 
   // ─── Overlay / modal state ────────────────────────────────
   const [keyModalOpen,  setKeyModalOpen]  = React.useState(false);
@@ -237,7 +239,9 @@ function StoryWeaverApp() {
             context={context} setContext={setContext}
             vocab={vocab} setVocab={setVocab}
             length={length} setLength={setLength}
-            tone={tone} setTone={setTone} />
+            tone={tone} setTone={setTone}
+            storyStyle={storyStyle} setStoryStyle={setStoryStyle}
+            character={character} setCharacter={setCharacter} />
         )}
         {tab === 'settings' && (
           <Settings t={theme} onOpenKeyModal={() => setKeyModalOpen(true)} />
