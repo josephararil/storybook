@@ -725,7 +725,8 @@ function Settings({ t, onOpenKeyModal }) {
 
 // ─── Reader ───────────────────────────────────────────────────
 function Reader({ t, story, onClose, onRate, onDelete }) {
-  const [rating, setRating] = useState(story.rating || 0);
+  const [rating,      setRating]      = useState(story.rating || 0);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
 
   const handleRate = (n) => {
     setRating(n);
@@ -767,14 +768,52 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
         {/* Hero cover */}
         <div style={{ marginTop: 36, marginBottom: 28, display: 'flex', justifyContent: 'center' }}>
           {story.coverImage ? (
-            <img src={story.coverImage} alt="" style={{
-              width: 200, height: 260, borderRadius: 20, objectFit: 'cover',
-              boxShadow: '0 12px 36px rgba(0,0,0,0.55)',
-            }} />
+            <img
+              src={story.coverImage} alt=""
+              onClick={() => setLightboxOpen(true)}
+              style={{
+                width: 200, height: 260, borderRadius: 20, objectFit: 'cover',
+                boxShadow: '0 12px 36px rgba(0,0,0,0.55)',
+                cursor: 'zoom-in',
+              }}
+            />
           ) : (
             <Cover story={story} mode={t.coverMode} w={200} h={260} radius={20} />
           )}
         </div>
+
+        {/* Lightbox */}
+        {lightboxOpen && (
+          <div
+            onClick={() => setLightboxOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 300,
+              background: 'rgba(2,6,23,0.92)',
+              backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'zoom-out',
+            }}
+          >
+            <img
+              src={story.coverImage} alt=""
+              style={{
+                maxWidth: '92vw', maxHeight: '88vh',
+                borderRadius: 24, objectFit: 'contain',
+                boxShadow: '0 24px 80px rgba(0,0,0,0.7)',
+              }}
+            />
+            <button
+              onClick={() => setLightboxOpen(false)}
+              style={{
+                position: 'absolute', top: 20, right: 20,
+                width: 40, height: 40, borderRadius: 999,
+                background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)',
+                color: '#fef3c7', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            ><Icon name="close" size={18} stroke={2.5} /></button>
+          </div>
+        )}
 
         {/* Meta */}
         <div style={{ textAlign: 'center', marginBottom: 28 }}>

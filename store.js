@@ -1,7 +1,7 @@
 // StoryWeaver persistent store
 // Exports window.SW — must load after data.js, before cover.jsx / screens.jsx / app.jsx
 
-const TEXT_MODEL  = "gemini-2.5-flash";
+const TEXT_MODEL  = "gemini-3.5-flash";
 const IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 
 // Capture seeds once; stays static throughout the session
