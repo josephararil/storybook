@@ -2,7 +2,11 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**Always update this file when you make structural changes** — new files, new state, new API methods, new routing, changed data shapes — without waiting to be asked.
+<!-- CLAUDE: Update this file in the same commit as every structural change. No exceptions, no reminders needed.
+     What counts: new/removed files, new exported functions, new component state or props, changed rendering
+     behaviour, new UI flows, new API calls, changed data shapes, new routing. If you touched it, document it. -->
+
+**Always update this file when you make structural changes** — new files, new state, new API methods, new routing, changed data shapes, new UI flows, changed rendering behaviour — without waiting to be asked. Same commit, every time.
 
 ## Git & Deployment
 
@@ -151,6 +155,17 @@ const DEFAULT_TEXT_MODEL  = "gemini-3.5-flash";
 const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
 ```
 
+### Image API helper (`callImageApi`)
+
+`imageCall` (story covers) and `generateLinkCover` (link covers) both delegate to a private `callImageApi(prompt, signal)` in `store.js`. It:
+
+- Resolves the reference image: Sophie's hardcoded photo (`window.SOPHIE_IMAGE`) → Settings upload (`getSampleImage()`) → none
+- Applies a 45-second hard timeout via a nested `AbortController`
+- POSTs to `getImageModel()` with the no-`generationConfig` format (see critical note below)
+- Returns a compressed WebP data URL via `compressToWebp`
+
+Do not inline this logic into callers; add new image call sites by calling `callImageApi` instead.
+
 ### Story Generation Flow (`weaveStory`)
 
 Generation is **sequential** (not parallel) to allow progressive feedback:
@@ -224,6 +239,29 @@ The Creator screen lifts all form state into `app.jsx`:
 - Error state auto-dismisses after 4s and navigates back to `/create`
 
 Race conditions are handled via `ignoreWeaveRef` (a `useRef`): set to `true` on cancel or skip before any async continuation checks it.
+
+## AddLinkModal (Link a Storybook)
+
+Opened from Creator → "Gemini Storybook" card, or the pencil edit button on any link in the library. Fields:
+
+| Field | Notes |
+|---|---|
+| Gemini URL | Required; opens in a new tab when the card is tapped |
+| Title | Required |
+| Scene | SVG fallback scene — only shown when no `coverImage` |
+| Palette | SVG fallback palette — only shown when no `coverImage` |
+| Cover Image | Optional AI-generated cover; free-text prompt → `generateLinkCover` |
+
+**Cover generation flow:**
+1. User types a description of the storybook in the textarea
+2. "Generate cover" calls `window.SW.generateLinkCover(description, signal)`
+3. The local `AbortController` is stored in `abortRef`; a `useEffect` cleanup aborts it on unmount
+4. On success: `coverImage` state is set; the SVG `<Cover>` preview is replaced by a `<img>` with a × to clear it
+5. `coverImage` (data URL or null) is always included in the `onSave` payload and spread onto the item in `onSaveLink`
+
+## Library Cards (`StoryCard`, `EditorialGrid`)
+
+Both `StoryCard` (grid layouts) and the hero slot in `EditorialGrid` render `item.coverImage` as an `<img>` when the field is present and non-null. Otherwise they fall back to the SVG `<Cover>` component. This applies to both AI-generated stories and linked storybooks that have had a cover generated.
 
 ## Reader Screen
 
