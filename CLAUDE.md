@@ -96,10 +96,11 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 ```js
 {
   id, title, scene, palette,
-  type:      'link',
-  url:       'https://...',
-  rating:    0,
-  createdAt: 1234567890,
+  type:       'link',
+  url:        'https://...',
+  rating:     0,
+  createdAt:  1234567890,
+  coverImage: 'data:image/webp;base64,...',  // AI-generated cover (optional), or null/absent
 }
 ```
 
@@ -128,6 +129,7 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 | `uniqueId(base, existingIds)` | Generate a unique kebab-case ID |
 | `slugify(title)` | Convert title to kebab-case |
 | `weaveStory(form, existingIds, signal, onProgress)` | Full AI story generation (text then image) |
+| `generateLinkCover(description, signal)` | Generate a cover image for a linked storybook; `description` is a free-text prompt about the book; returns a WebP data URL or throws |
 | `getGithubToken() / setGithubToken(k)` | GitHub PAT for Gist sync via localStorage (`sw_github_token`) — excluded from sync |
 | `getGistId() / setGistId(id)` | Gist ID for cloud sync via localStorage (`sw_gist_id`) |
 | `pushToGist()` | Serialize localStorage (excluding API keys) + all IndexedDB items → create/update private Gist; auto-saves returned Gist ID |

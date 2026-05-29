@@ -423,15 +423,8 @@ async function textCall(form, existingIds, signal) {
   return story;
 }
 
-async function imageCall(form, signal) {
-  const toneWord    = TONE_WORDS[form.tone - 1];
-  const childName   = getChildName();
-  const imagePrompt =
-    `Create a soft, dreamy children's picture-book cover illustration featuring ${childName}. ` +
-    `Scene: ${form.context}. Mood: ${toneWord}, calming night-time palette. ` +
-    `Portrait orientation, no text or lettering in the image.`;
-
-  // Reference image: hardcoded Sophie photo takes priority, then the Settings upload.
+// Shared low-level image call — builds ref image, hits the API, returns a WebP data URL.
+async function callImageApi(prompt, signal) {
   const refImage = (() => {
     if (window.SOPHIE_IMAGE?.data) return window.SOPHIE_IMAGE;
     const s = getSampleImage();
@@ -440,10 +433,9 @@ async function imageCall(form, signal) {
     return m ? { mimeType: m[1], data: m[2] } : null;
   })();
 
-  const parts = [{ text: imagePrompt }];
+  const parts = [{ text: prompt }];
   if (refImage) parts.push({ inline_data: { mime_type: refImage.mimeType, data: refImage.data } });
 
-  // Hard 45-second timeout; also respects the parent abort signal.
   const ctrl    = new AbortController();
   const timerId = setTimeout(() => ctrl.abort(), 45000);
   if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
@@ -458,19 +450,37 @@ async function imageCall(form, signal) {
         body: JSON.stringify({ contents: [{ parts }] }),
       }
     );
-
     if (!res.ok) throw new Error('Image generation failed.');
-
     const data     = await res.json();
     const resParts = data?.candidates?.[0]?.content?.parts || [];
     const imgPart  = resParts.find(p => p.inlineData || p.inline_data);
     if (!imgPart) throw new Error('No image in response.');
-
     const inlineData = imgPart.inlineData || imgPart.inline_data;
     return compressToWebp(inlineData.data);
   } finally {
     clearTimeout(timerId);
   }
+}
+
+async function imageCall(form, signal) {
+  const toneWord  = TONE_WORDS[form.tone - 1];
+  const childName = getChildName();
+  const prompt =
+    `Create a soft, dreamy children's picture-book cover illustration featuring ${childName}. ` +
+    `Scene: ${form.context}. Mood: ${toneWord}, calming night-time palette. ` +
+    `Portrait orientation, no text or lettering in the image.`;
+  return callImageApi(prompt, signal);
+}
+
+// Generate a cover image for a manually-linked storybook.
+async function generateLinkCover(description, signal) {
+  const childName = getChildName();
+  const prompt =
+    `Create a soft, dreamy children's picture-book cover illustration. ` +
+    `This storybook is about: ${description}. ` +
+    `Feature the child ${childName} prominently in a warm, magical scene. ` +
+    `Calming colours, portrait orientation, no text or lettering in the image.`;
+  return callImageApi(prompt, signal);
 }
 
 // ─── Main weave entry point ───────────────────────────────────
@@ -497,7 +507,7 @@ window.SW = {
   getChildName, setChildName, getChildBirthday, setChildBirthday,
   getSampleImage, setSampleImage, clearSampleImage, compressImageForStorage,
   mergeItems, uniqueId, slugify,
-  weaveStory,
+  weaveStory, generateLinkCover,
   getGithubToken, setGithubToken, getGistId, setGistId,
   pushToGist, pullFromGist,
 };

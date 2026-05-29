@@ -239,7 +239,11 @@ function StoryCard({ t, item, onOpen, onDelete, onEditLink, onRate, coverH = 210
       <button onClick={() => onOpen(item)} style={{
         background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', width: '100%',
       }}>
-        <Cover story={item} mode={t.coverMode} w="100%" h={coverH} radius={20} badge={item.type === 'link'} />
+        {item.coverImage ? (
+          <img src={item.coverImage} alt="" style={{ width: '100%', height: coverH, borderRadius: 20, objectFit: 'cover', display: 'block' }} />
+        ) : (
+          <Cover story={item} mode={t.coverMode} w="100%" h={coverH} radius={20} badge={item.type === 'link'} />
+        )}
         <StoryMeta t={t} story={item} onRate={onRate} />
       </button>
       <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
@@ -308,7 +312,11 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
         <button onClick={() => onOpen(hero)} style={{
           background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', textAlign: 'left', width: '100%',
         }}>
-          <Cover story={hero} mode={t.coverMode} w="100%" h={260} radius={2} badge={hero.type === 'link'} />
+          {hero.coverImage ? (
+            <img src={hero.coverImage} alt="" style={{ width: '100%', height: 260, borderRadius: 2, objectFit: 'cover', display: 'block' }} />
+          ) : (
+            <Cover story={hero} mode={t.coverMode} w="100%" h={260} radius={2} badge={hero.type === 'link'} />
+          )}
           <div style={{ marginTop: 14, paddingBottom: 10, borderBottom: `1px solid ${t.glassBorder}` }}>
             <div style={{ color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 6 }}>
               Tonight's feature · {hero.type === 'link' ? 'Gemini Storybook' : hero.category}
@@ -1383,21 +1391,51 @@ const PALETTE_PRESETS = [
 ];
 
 function AddLinkModal({ t, open, onClose, onSave, item }) {
-  const [url,     setUrl]     = useState(item?.url     || '');
-  const [title,   setTitle]   = useState(item?.title   || '');
-  const [scene,   setScene]   = useState(item?.scene   || 'moon');
-  const [palette, setPalette] = useState(item?.palette || PALETTE_PRESETS[0]);
+  const [url,          setUrl]          = useState(item?.url          || '');
+  const [title,        setTitle]        = useState(item?.title        || '');
+  const [scene,        setScene]        = useState(item?.scene        || 'moon');
+  const [palette,      setPalette]      = useState(item?.palette      || PALETTE_PRESETS[0]);
+  const [coverImage,   setCoverImage]   = useState(item?.coverImage   || null);
+  const [coverPrompt,  setCoverPrompt]  = useState('');
+  const [generating,   setGenerating]   = useState(false);
+  const [coverError,   setCoverError]   = useState('');
+  const abortRef = useRef(null);
 
   useEffect(() => {
-    setUrl    (item?.url     || '');
-    setTitle  (item?.title   || '');
-    setScene  (item?.scene   || 'moon');
-    setPalette(item?.palette || PALETTE_PRESETS[0]);
+    setUrl        (item?.url         || '');
+    setTitle      (item?.title       || '');
+    setScene      (item?.scene       || 'moon');
+    setPalette    (item?.palette     || PALETTE_PRESETS[0]);
+    setCoverImage (item?.coverImage  || null);
+    setCoverPrompt('');
+    setCoverError ('');
   }, [item]);
+
+  useEffect(() => {
+    return () => { abortRef.current?.abort(); };
+  }, []);
 
   if (!open) return null;
 
-  const canSave = url.trim() && title.trim();
+  const canSave     = url.trim() && title.trim();
+  const hasApiKey   = window.SW?.hasApiKey();
+
+  const handleGenerateCover = async () => {
+    if (!coverPrompt.trim() || !hasApiKey) return;
+    setGenerating(true);
+    setCoverError('');
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    try {
+      const img = await window.SW.generateLinkCover(coverPrompt.trim(), ctrl.signal);
+      setCoverImage(img);
+    } catch (e) {
+      if (e.name !== 'AbortError') setCoverError('Cover generation failed — please try again.');
+    } finally {
+      setGenerating(false);
+      abortRef.current = null;
+    }
+  };
 
   const fieldBox = {
     background: t.glass, border: `1px solid ${t.glassBorder}`,
@@ -1416,6 +1454,7 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
       backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
       overflowY: 'auto',
     }}>
+      <style>{`@keyframes sw-spin-lm { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
       <div style={{ padding: '72px 20px 120px', maxWidth: 440, margin: '0 auto' }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
@@ -1450,7 +1489,7 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
 
         {/* Scene chips */}
         <div style={{ ...fieldBox, padding: '14px 16px' }}>
-          <label style={labelStyle}>Scene</label>
+          <label style={labelStyle}>Scene <span style={{ fontWeight: 500, opacity: 0.45 }}>fallback if no cover image</span></label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {SCENES_LIST.map(s => (
               <button key={s} onClick={() => setScene(s)} style={{
@@ -1467,7 +1506,7 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
 
         {/* Palette swatches */}
         <div style={{ ...fieldBox, padding: '14px 16px' }}>
-          <label style={labelStyle}>Palette</label>
+          <label style={labelStyle}>Palette <span style={{ fontWeight: 500, opacity: 0.45 }}>fallback if no cover image</span></label>
           <div style={{ display: 'flex', gap: 10 }}>
             {PALETTE_PRESETS.map((p, i) => (
               <button key={i} onClick={() => setPalette(p)} style={{
@@ -1480,16 +1519,95 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
           </div>
         </div>
 
+        {/* AI cover image generation */}
+        <div style={fieldBox}>
+          <label style={labelStyle}>Cover Image <span style={{ fontWeight: 500, opacity: 0.45 }}>optional · AI generated</span></label>
+          <textarea
+            value={coverPrompt}
+            onChange={(e) => { setCoverPrompt(e.target.value); setCoverError(''); }}
+            disabled={generating}
+            placeholder="Describe the storybook — e.g. 'A little girl befriends a dragon who teaches her to bake starlight cookies'"
+            rows={3}
+            style={{
+              width: '100%', boxSizing: 'border-box', border: 'none', outline: 'none',
+              background: 'transparent', resize: 'none',
+              color: t.text, fontFamily: t.fontBody, fontSize: 14, lineHeight: 1.5, fontWeight: 500,
+              marginBottom: 10, opacity: generating ? 0.5 : 1,
+            }}
+          />
+          {coverError && (
+            <div style={{ color: '#f87171', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+              {coverError}
+            </div>
+          )}
+          <button
+            onClick={handleGenerateCover}
+            disabled={generating || !coverPrompt.trim() || !hasApiKey}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+              width: '100%', padding: '11px 16px', borderRadius: 12, border: 'none',
+              cursor: generating || !coverPrompt.trim() || !hasApiKey ? 'default' : 'pointer',
+              background: generating || !coverPrompt.trim() || !hasApiKey
+                ? 'rgba(251,191,36,0.12)'
+                : t.accentSoft,
+              color: generating || !coverPrompt.trim() || !hasApiKey ? t.textMuted : t.accent,
+              fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
+              border: `1px solid ${t.accent}33`,
+            }}
+          >
+            {generating ? (
+              <>
+                <div style={{
+                  width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
+                  border: `2px solid ${t.accent}`, borderTopColor: 'transparent',
+                  animation: 'sw-spin-lm 0.75s linear infinite',
+                }} />
+                Generating…
+              </>
+            ) : (
+              <><Icon name="image" size={15} stroke={2} /> Generate cover</>
+            )}
+          </button>
+          {!hasApiKey && (
+            <div style={{ marginTop: 8, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12 }}>
+              Configure a Gemini API key in Settings to generate covers.
+            </div>
+          )}
+        </div>
+
         {/* Cover preview */}
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
-          <Cover
-            story={{ scene, palette, type: 'link', title: title || 'Preview' }}
-            mode="glow" w={110} h={148} radius={16} badge={true}
-          />
+          {coverImage ? (
+            <div style={{ position: 'relative' }}>
+              <img
+                src={coverImage} alt="Generated cover"
+                style={{ width: 110, height: 148, borderRadius: 16, objectFit: 'cover', display: 'block', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}
+              />
+              <button
+                onClick={() => setCoverImage(null)}
+                title="Remove generated cover"
+                style={{
+                  position: 'absolute', top: -8, right: -8, width: 22, height: 22,
+                  borderRadius: 999, border: 'none', cursor: 'pointer',
+                  background: '#1e1b4b', color: t.textMuted,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.5)',
+                }}
+              >
+                <Icon name="close" size={11} stroke={2.5} />
+              </button>
+            </div>
+          ) : (
+            <Cover
+              story={{ scene, palette, type: 'link', title: title || 'Preview' }}
+              mode="glow" w={110} h={148} radius={16} badge={true}
+            />
+          )}
         </div>
 
         {/* Save button */}
-        <button onClick={() => canSave && onSave({ url: url.trim(), title: title.trim(), scene, palette }, item?.id || null)}
+        <button
+          onClick={() => canSave && onSave({ url: url.trim(), title: title.trim(), scene, palette, coverImage }, item?.id || null)}
           disabled={!canSave}
           style={{
             width: '100%', border: 'none', cursor: canSave ? 'pointer' : 'default',
