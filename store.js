@@ -2,7 +2,7 @@
 // Exports window.SW — must load after data.js, before cover.jsx / screens.jsx / app.jsx
 
 const DEFAULT_TEXT_MODEL  = "gemini-3.5-flash";
-const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
 
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
@@ -442,12 +442,15 @@ async function callImageApi(prompt, signal) {
 
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${getImageModel()}:generateContent`,
+      `https://generativelanguage.googleapis.com/v1/models/${getImageModel()}:generateContent`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
         signal: ctrl.signal,
-        body: JSON.stringify({ contents: [{ parts }] }),
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+        }),
       }
     );
     if (!res.ok) throw new Error('Image generation failed.');

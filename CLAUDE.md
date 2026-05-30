@@ -152,7 +152,7 @@ Models are user-configurable via Settings → Gemini AI (stored in localStorage)
 ```js
 // Defaults (overridden by sw_text_model / sw_image_model in localStorage)
 const DEFAULT_TEXT_MODEL  = "gemini-3.5-flash";
-const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview";
+const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
 ```
 
 ### Image API helper (`callImageApi`)
@@ -179,11 +179,13 @@ Generation is **sequential** (not parallel) to allow progressive feedback:
 ### Image API Payload (critical — do not change format)
 
 ```js
-body: JSON.stringify({ contents: [{ parts }] })
-// NO generationConfig, NO responseModalities, NO role field in contents
+body: JSON.stringify({
+  contents: [{ parts }],
+  generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+})
 ```
 
-Adding `generationConfig: { responseModalities: [...] }` causes a ~5 minute hang. The correct format has no `generationConfig` at all.
+`generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }` is **required** — without it the model defaults to text-only output and the request hangs for ~5 minutes. Do not remove it. No `role` field in `contents`.
 
 ### System Prompt (`buildSystemPrompt`)
 
