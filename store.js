@@ -448,7 +448,7 @@ async function callImageApi(prompt, signal) {
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
         signal: ctrl.signal,
         body: JSON.stringify({
-          contents: [{ parts }],
+          contents: [{ role: 'user', parts }],
           generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
         }),
       }

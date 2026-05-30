@@ -180,12 +180,12 @@ Generation is **sequential** (not parallel) to allow progressive feedback:
 
 ```js
 body: JSON.stringify({
-  contents: [{ parts }],
+  contents: [{ role: 'user', parts }],
   generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
 })
 ```
 
-`generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }` is **required** — without it the model defaults to text-only output and the request hangs for ~5 minutes. Do not remove it. No `role` field in `contents`.
+`role: 'user'` and `generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }` are both **required**. Omitting either causes a 400 or a silent hang. Endpoint is `v1` (not `v1beta`).
 
 ### System Prompt (`buildSystemPrompt`)
 
