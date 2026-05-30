@@ -173,8 +173,17 @@ Generation is **sequential** (not parallel) to allow progressive feedback:
 1. **`onProgress('text', null)`** — signals text phase start
 2. **`textCall(form, existingIds, signal)`** — calls `getTextModel()` with `systemInstruction` (custom override or built-in `buildSystemPrompt()`), JSON schema response, and structured user prompt. Returns a parsed story object.
 3. **`onProgress('image', story)`** — signals image phase start (story text is ready; UI can offer "skip image")
-4. **`imageCall(form, signal)`** — calls `getImageModel()` with a 45-second hard timeout. Uses Sophie's hardcoded photo (`window.SOPHIE_IMAGE`) as reference image; falls back to Settings upload (`getSampleImage()`), then no reference. Returns a WebP data URL or `null`.
+4. **`imageCall(form, signal, onRetry)`** — delegates to `callImageApi`, which tries up to 3 attempts (original + ref image → sanitized prompt + ref image → sanitized prompt, no ref image). Calls `onRetry(reason)` before each fallback; `weaveStory` forwards this as `onProgress('imageRetry', reason)`. Returns a WebP data URL or `null` if all attempts fail.
 5. Returns `{ ...story, type: 'story', coverImage, createdAt }`.
+
+### Image Safety & Retry Logic
+
+`callImageApi` wraps `callImageApiOnce` with automatic fallbacks to handle Google's safety filters:
+- **Attempt 1** (45 s): original prompt + reference image
+- **Attempt 2** (30 s): `sanitizeImagePrompt(prompt)` + reference image — strips "featuring [name]", "Feature the child [name] prominently", replaces "child" with "illustrated character"
+- **Attempt 3** (30 s): sanitized prompt, no reference image
+
+Each fallback emits `onProgress('imageRetry', reason)` (`'adjusting_prompt'` or `'no_reference'`), which `app.jsx` maps to a human-readable sub-message shown in the Weaving screen. All failures result in `null` (story saves without a cover).
 
 ### Image API Payload (critical — do not change format)
 
@@ -185,7 +194,7 @@ body: JSON.stringify({
 })
 ```
 
-`role: 'user'` and `generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }` are both **required**. Omitting either causes a 400 or a silent hang. Endpoint is `v1beta` (not `v1` — `v1` rejects `responseModalities`).
+Both `role: 'user'` and `generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }` are required. Omitting either causes a 400 or silent hang. Endpoint must be `v1beta` — `v1` rejects `responseModalities` as an unknown field. Do not call `callImageApiOnce` directly from new code; always go through `callImageApi` so retries are included.
 
 ### System Prompt (`buildSystemPrompt`)
 

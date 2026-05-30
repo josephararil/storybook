@@ -90,6 +90,7 @@ function StoryWeaverApp() {
   const [weaveError,    setWeaveError]    = React.useState(null);
   const [weavePhase,    setWeavePhase]    = React.useState(null);
   const [weavingStory,  setWeavingStory]  = React.useState(null);
+  const [weavingSubMsg, setWeavingSubMsg] = React.useState(null);
   const abortRef         = React.useRef(null);
   const ignoreWeaveRef   = React.useRef(false);
 
@@ -134,7 +135,13 @@ function StoryWeaverApp() {
         form, items.map(i => i.id), controller.signal,
         (phase, data) => {
           if (ignoreWeaveRef.current) return;
+          if (phase === 'imageRetry') {
+            const msgs = { adjusting_prompt: 'Adjusting prompt…', no_reference: 'Trying without reference photo…' };
+            setWeavingSubMsg(msgs[data] || 'Retrying…');
+            return;
+          }
           setWeavePhase(phase);
+          setWeavingSubMsg(null);
           if (phase === 'image' && data) setWeavingStory(data);
         }
       );
@@ -262,7 +269,7 @@ function StoryWeaverApp() {
       {openStory && (
         <Reader t={theme} story={openStory} onClose={() => navigate('/')} onRate={onRate} onDelete={onDelete} />
       )}
-      {isWeaving && <Weaving t={theme} error={weaveError} phase={weavePhase} onCancel={onCancelWeave} onSkipImage={weavingStory ? onSkipImage : null} />}
+      {isWeaving && <Weaving t={theme} error={weaveError} phase={weavePhase} onCancel={onCancelWeave} onSkipImage={weavingStory ? onSkipImage : null} subMessage={weavingSubMsg} />}
 
       {keyModalOpen && (
         <ApiKeyModal t={theme} open={keyModalOpen} onClose={() => setKeyModalOpen(false)} />

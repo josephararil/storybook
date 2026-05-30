@@ -1004,7 +1004,7 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
 }
 
 // ─── Weaving (loading / error) ────────────────────────────────
-function Weaving({ t, error, phase, onCancel, onSkipImage }) {
+function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
   const childName = window.SW?.getChildName() || 'your child';
   const [elapsed, setElapsed] = useState(0);
 
@@ -1117,9 +1117,16 @@ function Weaving({ t, error, phase, onCancel, onSkipImage }) {
           })}
         </div>
 
+        {/* Retry sub-message */}
+        {subMessage && (
+          <div style={{ marginTop: 10, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12, fontStyle: 'italic', opacity: 0.75, animation: 'sw-fadein 0.4s ease-out' }}>
+            {subMessage}
+          </div>
+        )}
+
         {/* Elapsed time */}
         {elapsed > 2 && (
-          <div style={{ marginTop: 16, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12, fontWeight: 500, opacity: 0.6 }}>
+          <div style={{ marginTop: 8, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12, fontWeight: 500, opacity: 0.6 }}>
             {fmtElapsed(elapsed)} elapsed
           </div>
         )}
