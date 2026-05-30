@@ -185,7 +185,7 @@ body: JSON.stringify({
 })
 ```
 
-`role: 'user'` and `generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }` are both **required**. Omitting either causes a 400 or a silent hang. Endpoint is `v1` (not `v1beta`).
+`role: 'user'` and `generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }` are both **required**. Omitting either causes a 400 or a silent hang. Endpoint is `v1beta` (not `v1` — `v1` rejects `responseModalities`).
 
 ### System Prompt (`buildSystemPrompt`)
 

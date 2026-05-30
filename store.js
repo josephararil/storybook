@@ -442,7 +442,7 @@ async function callImageApi(prompt, signal) {
 
   try {
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/${getImageModel()}:generateContent`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${getImageModel()}:generateContent`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
