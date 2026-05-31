@@ -298,49 +298,58 @@ function buildSystemPrompt(form, childName, targetParas) {
   const toneWord = TONE_WORDS[(form.tone || 3) - 1];
 
   const companionLine = form.character?.trim()
-    ? `Companion: ${childName} meets ${form.character.trim()} in this story. The meeting is warm and joyful. No other characters.`
+    ? `Companion: ${childName} meets ${form.character.trim()}. The meeting is warm and joyful. No other characters.`
     : `Companion: Exactly one friendly animal or magical creature. No other characters.`;
 
   const sentenceRules = form.storyStyle === 'rhyme'
     ? [
-        `RHYME SCHEME: AABB rhyming couplets throughout — no exceptions.`,
-        `Meter: approximately 8–10 syllables per line; aim for natural speech, not sing-songy.`,
-        `Quality: every rhyme must be a TRUE rhyme (not slant/near). Use common words a 4-year-old knows.`,
-        `Test: read each couplet aloud — if it stumbles, rewrite it.`,
+        `Structure: Write in AABB rhyming couplets.`,
+        `Rhythm: Keep the cadence gentle, rhythmic, and highly readable. Avoid forced or overly complex rhymes.`,
+        `Language: Use simple, comforting vocabulary suitable for a 4-year-old. Every rhyme must be a true rhyme.`
       ].join(' ')
-    : `Sentence structure: Short, clear sentences (8–12 words max). Vary the rhythm so it sounds natural when read aloud. Use present tense.`;
+    : `Structure: Use short, clear sentences. Vary the rhythm so it sounds natural and conversational when read aloud. Use present tense.`;
 
-  // Middle exploration paragraphs fill the space between the fixed opening (2) and closing (2) beats.
-  const middleCount = Math.max(1, targetParas - 4);
+  // Adjust narrative pacing dynamically to fit targetParas exactly
+  let narrativeArc = [];
+  if (targetParas <= 3) {
+    narrativeArc = [
+      `1. Discovery & Meeting: ${childName} finds a magical element in a safe setting and warmly meets her companion.`,
+      `2. Exploration: They play and collaborate using a gentle magical mechanic.`,
+      `3. Resolution: A soft transition to rest. ${childName} feels safe and sleepy. End peacefully.`
+    ];
+  } else {
+    const middleCount = targetParas - 3; // Subtracting Intro, Comfort, and Resolution
+    narrativeArc = [
+      `1. Discovery & Meeting: ${childName} finds a magical element in a safe setting and warmly introduces herself to her companion.`,
+      `2 to ${1 + middleCount}. Exploration: Across these middle paragraphs, they explore and play using a gentle magical mechanic (e.g., floating on a cloud). Deepen their connection.`,
+      `${2 + middleCount}. Comfort: A gentle transition toward rest. A soft problem is solved (e.g., finding a lost blanket) or a quiet realization is shared.`,
+      `${3 + middleCount}. Resolution: The companion settles down. ${childName} feels safe, loved, and sleepy. End on absolute warmth and peace.`
+    ];
+  }
 
   return [
-    `You are an expert children's author writing warm, comforting bedtime stories for 4-year-olds. Return ONLY JSON matching the schema.`,
+    `You are an expert children's author writing warm, comforting bedtime stories. Return ONLY valid JSON matching the exact schema requested.`,
     ``,
-    `[CHARACTER]`,
-    `Main character: ${childName}. Imaginative, brave, and active — she drives the action (investigates, helps, guides). Never a passive observer.`,
+    `[CHARACTER & TONE]`,
+    `Main character: ${childName}. Imaginative, brave, and active—she drives the action.`,
     companionLine,
+    `Tone: ${toneWord} — permeate every sentence with this feeling.`,
+    `Atmosphere: Weave in gentle sensory details (soft hums, textures, gentle glows). Focus on comfort and wonder.`,
+    `Restricted: NEVER use "suddenly", "unfortunately", "however", "scary", or "dark". No narrative clichés.`,
     ``,
-    `[TONE & STYLE]`,
-    `Tone: ${toneWord} — let this feeling permeate every sentence.`,
+    `[STYLE & FORMATTING]`,
     sentenceRules,
-    `Sensory details: weave in sounds (rustling leaves, soft hums), textures, and gentle glows. Focus on comfort, safety, and wonder.`,
-    `Restricted words: NEVER use "suddenly", "unfortunately", "however", "scary", or "dark". Avoid narrative clichés.`,
+    `Vocabulary Requirement: Every word in the provided vocabulary list MUST appear in the story text wrapped in curly braces (e.g., {gentle}). Do not alter the word inside the braces.`,
     ``,
-    `[NARRATIVE ARC (${targetParas} paragraphs)]`,
-    `• Paragraph 1 — Discovery: ${childName} finds a magical element in a safe, familiar setting (e.g., her garden, her bedroom). Curiosity, not fear.`,
-    `• Paragraph 2 — Meeting: ${childName} introduces herself to her companion. They share a warm first moment.`,
-    `• Middle ${middleCount} paragraph(s) — Exploration & Interaction: ${childName} and companion actively explore, play, and collaborate using a gentle magical mechanic (e.g., floating on a cloud, tracing glowing paths). Deepen their connection across each paragraph.`,
-    `• Second-to-last paragraph — Comfort: A gentle transition toward rest. A soft problem is solved (e.g., finding a lost blanket, helping a star find its spot) or a quiet realisation is shared.`,
-    `• Last paragraph — Resolution: The companion settles down. ${childName} feels safe, loved, and sleepy. The magic remains safe for tomorrow. End on absolute warmth and peace.`,
+    `[NARRATIVE ARC (${targetParas} total sections)]`,
+    ...narrativeArc,
     ``,
-    `[VOCABULARY RULES]`,
-    `Every word in the vocabulary list MUST appear in body[] wrapped in curly braces exactly as given (e.g., {gentle}). Do not inflect, change tense, or pluralize inside the braces. List each word unbraced in vocab[].`,
-    ``,
-    `[SCHEMA]`,
-    `scene ∈ {moon,fox,unicorn,whale,dragon,bear,cloud,turtle}. category ∈ {Bedtime,Animals,Magic,Adventure,Friends}.`,
-    `palette: exactly 3 #rrggbb colors (dark base, mid tone, light accent). id: kebab-case from title. rating: 0.`,
-    `Each body[] element is one paragraph of 40–60 words. Do not let the word count constraint make the prose repetitive.`,
-  ].filter(s => s !== null && s !== undefined).join('\n');
+    `[JSON SCHEMA OUTPUT]`,
+    `scene ∈ {moon,fox,unicorn,whale,dragon,bear,cloud,turtle}`,
+    `category ∈ {Bedtime,Animals,Magic,Adventure,Friends}`,
+    `palette: Exactly 3 #rrggbb hex codes (dark base, mid tone, light accent). id: kebab-case from title. rating: 0.`,
+    `body: Array of strings. Each string represents one section of the narrative arc. Keep sections concise but descriptive.`
+  ].filter(Boolean).join('\n');
 }
 
 function getDefaultSystemPrompt() {
