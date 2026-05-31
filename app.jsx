@@ -76,10 +76,10 @@ function StoryWeaverApp() {
   };
 
   // ─── Lifted Creator form state ────────────────────────────
-  const [context,    setContext]    = React.useState(() => `${window.SW.getChildName()} played in the garden today and found a lonely beetle.`);
-  const [vocab,      setVocab]      = React.useState(['curious', 'tiny', 'gentle']);
+  const [context,    setContext]    = React.useState('');
+  const [vocab,      setVocab]      = React.useState([]);
   const [length,     setLength]     = React.useState(4);
-  const [tone,       setTone]       = React.useState(3);
+  const [tone,       setTone]       = React.useState('Gentle');
   const [storyStyle, setStoryStyle] = React.useState('prose');
   const [character,  setCharacter]  = React.useState('');
 
