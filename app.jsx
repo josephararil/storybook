@@ -131,7 +131,7 @@ function StoryWeaverApp() {
     abortRef.current = controller;
 
     try {
-      const story = await window.SW.weaveStory(
+      const result = await window.SW.weaveStory(
         form, items.map(i => i.id), controller.signal,
         (phase, data) => {
           if (ignoreWeaveRef.current) return;
@@ -142,22 +142,45 @@ function StoryWeaverApp() {
           }
           setWeavePhase(phase);
           setWeavingSubMsg(null);
-          if (phase === 'image' && data) setWeavingStory(data);
+          if ((phase === 'image' || phase === 'audio') && data) setWeavingStory(data);
         }
       );
       if (ignoreWeaveRef.current) return;
+
+      // Extract audio separately — don't persist the large blob in the items store
+      const { audioData, ...story } = result;
+      if (audioData) await window.SW.audioPut(story.id, audioData);
       await window.SW.itemPut(story);
       setItems(prev => [story, ...prev]);
 
-      // Non-blocking Drive backup — runs after navigation
-      if (window.SW.drive.isConnected() && story.coverImage) {
-        window.SW.drive.uploadCover(story.id, story.coverImage)
-          .then(coverDriveId => {
-            const upd = Object.assign({}, story, { coverDriveId });
-            window.SW.itemPut(upd);
-            setItems(prev => prev.map(i => i.id === story.id ? upd : i));
-          })
-          .catch(() => {});
+      // Non-blocking Drive backups — read latest state to avoid field-collision race
+      if (window.SW.drive.isConnected()) {
+        if (story.coverImage) {
+          window.SW.drive.uploadCover(story.id, story.coverImage)
+            .then(coverDriveId => {
+              setItems(prev => {
+                const cur = prev.find(i => i.id === story.id);
+                if (!cur) return prev;
+                const upd = Object.assign({}, cur, { coverDriveId });
+                window.SW.itemPut(upd);
+                return prev.map(i => i.id === story.id ? upd : i);
+              });
+            })
+            .catch(() => {});
+        }
+        if (audioData) {
+          window.SW.drive.uploadAudio(story.id, audioData)
+            .then(audioDriveId => {
+              setItems(prev => {
+                const cur = prev.find(i => i.id === story.id);
+                if (!cur) return prev;
+                const upd = Object.assign({}, cur, { audioDriveId });
+                window.SW.itemPut(upd);
+                return prev.map(i => i.id === story.id ? upd : i);
+              });
+            })
+            .catch(() => {});
+        }
       }
 
       navigate('/story/' + story.id);
@@ -184,7 +207,9 @@ function StoryWeaverApp() {
     const partial = weavingStory;
     if (!partial) return;
     ignoreWeaveRef.current = true;
-    const story = { ...partial, type: 'story', createdAt: Date.now() };
+    if (abortRef.current) abortRef.current.abort(); // cancel ongoing generation
+    // Spread order: defaults first, then partial wins (preserves type/createdAt if already set)
+    const story = { type: 'story', createdAt: Date.now(), ...partial };
     await window.SW.itemPut(story);
     setItems(prev => [story, ...prev]);
     setWeavingStory(null);
@@ -251,6 +276,7 @@ function StoryWeaverApp() {
       window.SW.deleteSeed(id);
     } else {
       await window.SW.itemDelete(id);
+      window.SW.audioDelete(id).catch(() => {});
     }
     setItems(prev => prev.filter(i => i.id !== id));
     if (route.startsWith('/story/')) navigate('/');

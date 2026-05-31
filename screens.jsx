@@ -29,6 +29,8 @@ function Icon({ name, size = 22, stroke = 2 }) {
     eye:        <><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></>,
     'eye-off':  <><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></>,
     check:      <><path d="M20 6L9 17l-5-5" /></>,
+    play:       <><polygon points="5 3 19 12 5 21 5 3" /></>,
+    pause:      <><rect x="6" y="4" width="4" height="16" /><rect x="14" y="4" width="4" height="16" /></>,
   };
   return <svg {...props}>{paths[name]}</svg>;
 }
@@ -575,11 +577,6 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
   const [childName,    setChildNameLocal] = useState(() => window.SW?.getChildName() || 'Sophie');
   const [birthday,     setBirthdayLocal]  = useState(() => window.SW?.getChildBirthday() || '');
   const [sampleSet,    setSampleSet]      = useState(() => !!window.SW?.getSampleImage());
-  const [githubToken,  setGithubTokenLocal] = useState(() => window.SW?.getGithubToken() || '');
-  const [gistId,       setGistIdLocal]    = useState(() => window.SW?.getGistId() || '');
-  const [showToken,    setShowToken]      = useState(false);
-  const [syncStatus,   setSyncStatus]     = useState(null); // null | {ok, msg} | {err, msg}
-  const [syncing,      setSyncing]        = useState(null); // null | 'push' | 'pull'
   const photoInputRef = useRef(null);
   const apiConfigured = window.SW?.hasApiKey();
 
@@ -589,6 +586,8 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
   const [driveError,      setDriveError]      = useState(null);
   const [migrating,       setMigrating]       = useState(false);
   const [migrateProgress, setMigrateProgress] = useState(null);
+  const [driveSync,       setDriveSync]       = useState(null);
+  const [driveSyncStatus, setDriveSyncStatus] = useState(null);
 
   const migrateCount = (items || []).filter(i => i.coverImage && !i.coverDriveId).length;
 
@@ -626,28 +625,27 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
     }
   };
 
-  const handlePush = async () => {
-    setSyncing('push');
-    setSyncStatus(null);
+  const handleDrivePush = async () => {
+    setDriveSync('push');
+    setDriveSyncStatus(null);
     try {
-      const id = await window.SW.pushToGist();
-      setGistIdLocal(id);
-      setSyncStatus({ ok: true, msg: 'Saved to cloud.' });
+      await window.SW.drive.pushSync();
+      setDriveSyncStatus({ ok: true, msg: 'Saved to Google Drive.' });
     } catch (e) {
-      setSyncStatus({ err: true, msg: e.message });
+      setDriveSyncStatus({ err: true, msg: e.message });
     } finally {
-      setSyncing(null);
+      setDriveSync(null);
     }
   };
 
-  const handlePull = async () => {
-    setSyncing('pull');
-    setSyncStatus(null);
+  const handleDrivePull = async () => {
+    setDriveSync('pull');
+    setDriveSyncStatus(null);
     try {
-      await window.SW.pullFromGist(); // reloads on success
+      await window.SW.drive.pullSync(); // reloads page on success
     } catch (e) {
-      setSyncStatus({ err: true, msg: e.message });
-      setSyncing(null);
+      setDriveSyncStatus({ err: true, msg: e.message });
+      setDriveSync(null);
     }
   };
 
@@ -848,106 +846,53 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
             color: '#f87171', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600,
           }}>{driveError}</div>
         )}
-      </div>
 
-      {/* Cloud Sync */}
-      <div style={{
-        background: t.glass, border: `1px solid ${t.glassBorder}`,
-        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
-        borderRadius: 22, padding: 20, marginBottom: 18,
-      }}>
-        <div style={{ fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', color: t.textMuted, marginBottom: 14 }}>Cloud Sync</div>
-
-        {/* GitHub token */}
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 4 }}>GitHub Token</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input
-              type={showToken ? 'text' : 'password'}
-              placeholder="ghp_xxxxxxxxxxxx"
-              value={githubToken}
-              onChange={(e) => { setGithubTokenLocal(e.target.value); window.SW?.setGithubToken(e.target.value); }}
-              style={{
-                flex: 1, border: `1px solid ${t.glassBorder}`, outline: 'none',
-                background: 'rgba(255,255,255,0.06)', borderRadius: 10,
-                color: t.text, fontFamily: 'monospace', fontSize: 13,
-                padding: '8px 12px', colorScheme: 'dark',
-              }}
-            />
-            <button onClick={() => setShowToken(v => !v)} style={{
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              color: t.textMuted, padding: 4, display: 'flex', alignItems: 'center',
-            }}>
-              <Icon name={showToken ? 'eye-off' : 'eye'} size={16} stroke={2} />
-            </button>
-          </div>
-        </div>
-
-        {/* Gist ID */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 4 }}>Gist ID <span style={{ fontWeight: 400, opacity: 0.6 }}>(leave blank to auto-generate)</span></div>
-          <input
-            type="text"
-            placeholder="Auto-generated on first push"
-            value={gistId}
-            onChange={(e) => { setGistIdLocal(e.target.value); window.SW?.setGistId(e.target.value); }}
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              border: `1px solid ${t.glassBorder}`, outline: 'none',
-              background: 'rgba(255,255,255,0.06)', borderRadius: 10,
-              color: t.text, fontFamily: 'monospace', fontSize: 13,
-              padding: '8px 12px', colorScheme: 'dark',
-            }}
-          />
-        </div>
-
-        {/* Buttons */}
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            onClick={handlePush}
-            disabled={!!syncing}
-            style={{
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-              padding: '11px 0', borderRadius: 12,
-              background: syncing === 'push' ? t.accentSoft : t.accentSoft,
-              border: `1px solid ${t.accent}55`,
-              color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
-              cursor: syncing ? 'default' : 'pointer', opacity: syncing && syncing !== 'push' ? 0.45 : 1,
-            }}
-          >
-            <Icon name="cloud-up" size={15} stroke={2} />
-            {syncing === 'push' ? 'Saving…' : 'Store in Cloud'}
-          </button>
-          <button
-            onClick={handlePull}
-            disabled={!!syncing}
-            style={{
-              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-              padding: '11px 0', borderRadius: 12,
-              background: 'rgba(255,255,255,0.05)',
-              border: `1px solid ${t.glassBorder}`,
-              color: t.text, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
-              cursor: syncing ? 'default' : 'pointer', opacity: syncing && syncing !== 'pull' ? 0.45 : 1,
-            }}
-          >
-            <Icon name="cloud-dn" size={15} stroke={2} />
-            {syncing === 'pull' ? 'Retrieving…' : 'Retrieve from Cloud'}
-          </button>
-        </div>
-
-        {/* Status */}
-        {syncStatus && (
-          <div style={{
-            marginTop: 12, padding: '9px 12px', borderRadius: 10,
-            background: syncStatus.ok ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)',
-            border: `1px solid ${syncStatus.ok ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)'}`,
-            color: syncStatus.ok ? '#4ade80' : '#f87171',
-            fontFamily: t.fontBody, fontSize: 13, fontWeight: 600,
-            display: 'flex', alignItems: 'center', gap: 7,
-          }}>
-            {syncStatus.ok && <Icon name="check" size={14} stroke={2.5} />}
-            {syncStatus.msg}
-          </div>
+        {driveConnected && (
+          <>
+            <div style={{ marginTop: 14, display: 'flex', gap: 10 }}>
+              <button
+                onClick={handleDrivePush}
+                disabled={!!driveSync}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  padding: '11px 0', borderRadius: 12,
+                  background: t.accentSoft, border: `1px solid ${t.accent}55`,
+                  color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
+                  cursor: driveSync ? 'default' : 'pointer', opacity: driveSync && driveSync !== 'push' ? 0.45 : 1,
+                }}
+              >
+                <Icon name="cloud-up" size={15} stroke={2} />
+                {driveSync === 'push' ? 'Saving…' : 'Save to Drive'}
+              </button>
+              <button
+                onClick={handleDrivePull}
+                disabled={!!driveSync}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  padding: '11px 0', borderRadius: 12,
+                  background: 'rgba(255,255,255,0.05)', border: `1px solid ${t.glassBorder}`,
+                  color: t.text, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
+                  cursor: driveSync ? 'default' : 'pointer', opacity: driveSync && driveSync !== 'pull' ? 0.45 : 1,
+                }}
+              >
+                <Icon name="cloud-dn" size={15} stroke={2} />
+                {driveSync === 'pull' ? 'Restoring…' : 'Restore from Drive'}
+              </button>
+            </div>
+            {driveSyncStatus && (
+              <div style={{
+                marginTop: 10, padding: '9px 12px', borderRadius: 10,
+                background: driveSyncStatus.ok ? 'rgba(74,222,128,0.12)' : 'rgba(248,113,113,0.12)',
+                border: `1px solid ${driveSyncStatus.ok ? 'rgba(74,222,128,0.3)' : 'rgba(248,113,113,0.3)'}`,
+                color: driveSyncStatus.ok ? '#4ade80' : '#f87171',
+                fontFamily: t.fontBody, fontSize: 13, fontWeight: 600,
+                display: 'flex', alignItems: 'center', gap: 7,
+              }}>
+                {driveSyncStatus.ok && <Icon name="check" size={14} stroke={2.5} />}
+                {driveSyncStatus.msg}
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -983,12 +928,54 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
 
 // ─── Reader ───────────────────────────────────────────────────
 function Reader({ t, story, onClose, onRate, onDelete }) {
-  const [rating,      setRating]      = useState(story.rating || 0);
+  const [rating,       setRating]       = useState(story.rating || 0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [playing,      setPlaying]      = useState(false);
+  const [audioSrc,     setAudioSrc]     = useState(null);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const audioRef = useRef(null);
+
+  const hasAudio = story.audioReady || !!story.audioDriveId;
 
   const handleRate = (n) => {
     setRating(n);
     if (onRate) onRate(story.id, n);
+  };
+
+  // Auto-play once the audio src is loaded into state
+  useEffect(() => {
+    if (audioSrc && audioRef.current) {
+      audioRef.current.play().catch(() => {});
+    }
+  }, [audioSrc]);
+
+  // Pause on unmount
+  useEffect(() => {
+    return () => { if (audioRef.current) audioRef.current.pause(); };
+  }, []);
+
+  const toggleAudio = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (playing) audio.pause();
+    else audio.play().catch(() => {});
+  };
+
+  const loadAndToggle = async () => {
+    if (audioSrc) { toggleAudio(); return; }
+    setAudioLoading(true);
+    try {
+      let src = await window.SW.audioGet(story.id);
+      if (!src && story.audioDriveId) {
+        src = await window.SW.drive.fetchAudio(story.audioDriveId);
+        if (src) await window.SW.audioPut(story.id, src);
+      }
+      if (src) setAudioSrc(src);
+    } catch (e) {
+      console.warn('Failed to load audio:', e);
+    } finally {
+      setAudioLoading(false);
+    }
   };
 
   const renderLine = (line, i) => {
@@ -1013,6 +1000,17 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
       background: 'radial-gradient(110% 90% at 50% -10%, #1e1b4b 0%, #050514 70%)',
       display: 'flex', flexDirection: 'column',
     }}>
+      {/* Hidden audio element — rendered only once src is available */}
+      {audioSrc && (
+        <audio
+          ref={audioRef}
+          src={audioSrc}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
+        />
+      )}
+
       <button onClick={onClose} style={{
         position: 'absolute', top: 64, right: 20, zIndex: 5,
         width: 40, height: 40, borderRadius: 999,
@@ -1022,7 +1020,7 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
         backdropFilter: 'blur(12px)',
       }}><Icon name="close" size={18} stroke={2.5} /></button>
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: '60px 28px 40px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: `60px 28px ${hasAudio ? 140 : 40}px` }}>
         {/* Hero cover */}
         <div style={{ marginTop: 36, marginBottom: 28, display: 'flex', justifyContent: 'center' }}>
           {story.coverImage ? (
@@ -1115,6 +1113,54 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
           </div>
         )}
       </div>
+
+      {/* Floating audio player — always visible while scrolling */}
+      {hasAudio && (
+        <div style={{
+          position: 'absolute',
+          bottom: 'max(32px, env(safe-area-inset-bottom))',
+          left: '50%', transform: 'translateX(-50%)',
+          zIndex: 10,
+        }}>
+          <button
+            onClick={loadAndToggle}
+            disabled={audioLoading}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '14px 26px', borderRadius: 999,
+              background: playing
+                ? `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})`
+                : 'rgba(15, 12, 45, 0.75)',
+              backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)',
+              border: `1px solid ${playing ? 'transparent' : t.glassBorder}`,
+              color: playing ? '#1a0a3e' : t.text,
+              fontFamily: t.fontBody, fontWeight: 700, fontSize: 15,
+              cursor: audioLoading ? 'default' : 'pointer',
+              opacity: audioLoading ? 0.7 : 1,
+              boxShadow: playing
+                ? `0 8px 28px ${t.accent}66`
+                : '0 4px 20px rgba(0,0,0,0.55)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {audioLoading ? (
+              <>
+                <div style={{
+                  width: 16, height: 16, borderRadius: '50%',
+                  border: `2px solid ${t.accent}`, borderTopColor: 'transparent',
+                  animation: 'sw-spin 0.75s linear infinite', flexShrink: 0,
+                }} />
+                Loading…
+              </>
+            ) : (
+              <>
+                <Icon name={playing ? 'pause' : 'play'} size={20} stroke={2} />
+                {playing ? 'Pause narration' : 'Listen to story'}
+              </>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1132,8 +1178,9 @@ function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
   }, [error]);
 
   const phases = [
-    { key: 'text',  label: 'Writing your story' },
-    { key: 'image', label: 'Painting the cover'  },
+    { key: 'text',  label: 'Writing your story'  },
+    { key: 'image', label: 'Painting the cover'   },
+    { key: 'audio', label: 'Recording narration'  },
   ];
   const currentIdx = phases.findIndex(p => p.key === phase);
   const getState   = (i) => i < currentIdx ? 'done' : i === currentIdx ? 'active' : 'pending';
@@ -1247,15 +1294,15 @@ function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
           </div>
         )}
 
-        {/* Skip image button — shown once we're in the image phase */}
-        {phase === 'image' && onSkipImage && (
+        {/* Skip button — shown in image and audio phases */}
+        {(phase === 'image' || phase === 'audio') && onSkipImage && (
           <button onClick={onSkipImage} style={{
             marginTop: 24, padding: '12px 26px', borderRadius: 14,
             background: t.accentSoft, border: `1px solid ${t.accent}55`,
             color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
             cursor: 'pointer', animation: 'sw-fadein 0.5s ease-out forwards',
           }}>
-            Skip image · Read now
+            {phase === 'audio' ? 'Skip narration · Read now' : 'Skip image · Read now'}
           </button>
         )}
 

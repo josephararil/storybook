@@ -3,6 +3,7 @@
 
 const DEFAULT_TEXT_MODEL  = "gemini-3.5-flash";
 const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
+const DEFAULT_AUDIO_MODEL = "gemini-3.1-flash-tts-preview";
 
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
@@ -12,10 +13,14 @@ let _db = null;
 function dbOpen() {
   if (_db) return Promise.resolve(_db);
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('storyweaver', 1);
+    const req = indexedDB.open('storyweaver', 2);
     req.onupgradeneeded = (e) => {
-      if (!e.target.result.objectStoreNames.contains('items')) {
-        e.target.result.createObjectStore('items', { keyPath: 'id' });
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains('items')) {
+        db.createObjectStore('items', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('audio')) {
+        db.createObjectStore('audio', { keyPath: 'id' });
       }
     };
     req.onsuccess = (e) => { _db = e.target.result; resolve(_db); };
@@ -51,6 +56,30 @@ function itemDelete(id) {
   }));
 }
 
+function audioGet(id) {
+  return dbOpen().then(db => new Promise((resolve, reject) => {
+    const req = db.transaction('audio', 'readonly').objectStore('audio').get(id);
+    req.onsuccess = () => resolve(req.result?.data || null);
+    req.onerror   = ()  => reject(req.error);
+  }));
+}
+
+function audioPut(id, dataUrl) {
+  return dbOpen().then(db => new Promise((resolve, reject) => {
+    const req = db.transaction('audio', 'readwrite').objectStore('audio').put({ id, data: dataUrl });
+    req.onsuccess = () => resolve();
+    req.onerror   = ()  => reject(req.error);
+  }));
+}
+
+function audioDelete(id) {
+  return dbOpen().then(db => new Promise((resolve, reject) => {
+    const req = db.transaction('audio', 'readwrite').objectStore('audio').delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror   = ()  => reject(req.error);
+  }));
+}
+
 // ─── API key helpers ──────────────────────────────────────────
 function getApiKey()  { return localStorage.getItem('sw_gemini_key') || ''; }
 function setApiKey(k) { localStorage.setItem('sw_gemini_key', k); }
@@ -61,6 +90,8 @@ function getTextModel()   { return localStorage.getItem('sw_text_model')  || DEF
 function setTextModel(m)  { localStorage.setItem('sw_text_model', m); }
 function getImageModel()  { return localStorage.getItem('sw_image_model') || DEFAULT_IMAGE_MODEL; }
 function setImageModel(m) { localStorage.setItem('sw_image_model', m); }
+function getAudioModel()  { return localStorage.getItem('sw_audio_model') || DEFAULT_AUDIO_MODEL; }
+function setAudioModel(m) { localStorage.setItem('sw_audio_model', m); }
 
 // ─── Custom system prompt helpers ─────────────────────────────
 function getCustomSystemPrompt()  { return localStorage.getItem('sw_system_prompt') || ''; }
@@ -69,94 +100,6 @@ function setCustomSystemPrompt(s) {
   else   localStorage.removeItem('sw_system_prompt');
 }
 
-// ─── GitHub Gist sync helpers ─────────────────────────────────
-function getGithubToken()   { return localStorage.getItem('sw_github_token') || ''; }
-function setGithubToken(k)  { localStorage.setItem('sw_github_token', k); }
-function getGistId()        { return localStorage.getItem('sw_gist_id') || ''; }
-function setGistId(id)      { localStorage.setItem('sw_gist_id', id); }
-
-const GIST_EXCLUDED = new Set(['sw_gemini_key', 'sw_github_token']);
-const GIST_FILENAME = 'storyweaver-sync.json';
-
-async function pushToGist() {
-  const token = getGithubToken();
-  if (!token) throw new Error('GitHub token not set.');
-
-  const lsData = {};
-  for (let i = 0; i < localStorage.length; i++) {
-    const key = localStorage.key(i);
-    if (!GIST_EXCLUDED.has(key)) lsData[key] = localStorage.getItem(key);
-  }
-
-  const idbItems = await itemsAll();
-  const payload  = JSON.stringify({ version: 1, localStorage: lsData, indexedDB: idbItems });
-
-  const gistId = getGistId();
-  const res = await fetch(
-    gistId ? `https://api.github.com/gists/${gistId}` : 'https://api.github.com/gists',
-    {
-      method: gistId ? 'PATCH' : 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-      body: JSON.stringify({
-        description: 'StoryWeaver cloud sync',
-        public: false,
-        files: { [GIST_FILENAME]: { content: payload } },
-      }),
-    }
-  );
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `GitHub API error ${res.status}`);
-  }
-
-  const data = await res.json();
-  setGistId(data.id);
-  return data.id;
-}
-
-async function pullFromGist() {
-  const token  = getGithubToken();
-  const gistId = getGistId();
-  if (!token)  throw new Error('GitHub token not set.');
-  if (!gistId) throw new Error('Gist ID not set.');
-
-  const res = await fetch(`https://api.github.com/gists/${gistId}`, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `GitHub API error ${res.status}`);
-  }
-
-  const data    = await res.json();
-  const content = data.files?.[GIST_FILENAME]?.content;
-  if (!content) throw new Error('No StoryWeaver data found in this gist.');
-
-  const parsed = JSON.parse(content);
-
-  if (parsed.localStorage) {
-    for (const [key, value] of Object.entries(parsed.localStorage)) {
-      if (!GIST_EXCLUDED.has(key)) localStorage.setItem(key, value);
-    }
-  }
-
-  if (Array.isArray(parsed.indexedDB)) {
-    for (const item of parsed.indexedDB) await itemPut(item);
-  }
-
-  window.location.reload();
-}
 
 async function validateApiKey(k) {
   try {
@@ -279,6 +222,38 @@ function compressToWebp(base64Png) {
     img.onerror = () => resolve(`data:image/png;base64,${base64Png}`);
     img.src = `data:image/png;base64,${base64Png}`;
   });
+}
+
+// ─── PCM → WAV conversion ─────────────────────────────────────
+function pcmToWav(pcmBytes, sampleRate, numChannels, bitsPerSample) {
+  const dataLen = pcmBytes.byteLength || pcmBytes.length;
+  const buf  = new ArrayBuffer(44 + dataLen);
+  const view = new DataView(buf);
+  const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, 'RIFF');
+  view.setUint32(4,  36 + dataLen, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);  // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
+  view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+  view.setUint16(34, bitsPerSample, true);
+  writeStr(36, 'data');
+  view.setUint32(40, dataLen, true);
+  new Uint8Array(buf, 44).set(pcmBytes);
+  return buf;
+}
+
+function uint8ArrayToBase64(bytes) {
+  let binary = '';
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
+  }
+  return btoa(binary);
 }
 
 // ─── Story schema ─────────────────────────────────────────────
@@ -515,8 +490,85 @@ async function generateLinkCover(description, signal) {
   return callImageApi(prompt, signal);
 }
 
+// ─── TTS audio generation ─────────────────────────────────────
+// Returns a WAV data URL, or null if unavailable / aborted.
+async function generateAudio(story, signal) {
+  if (signal?.aborted) return null;
+
+  const bodyText = (story.body || [])
+    .map(p => p.replace(/\{([^}]+)\}/g, '$1'))
+    .join('\n\n');
+  const narrationText = `${story.title}\n\n${bodyText}`;
+
+  const ctrl    = new AbortController();
+  const timerId = setTimeout(() => ctrl.abort(), 120000);
+  if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${getAudioModel()}:streamGenerateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [{ text: `Read this children's bedtime story in a warm, gentle narrator's voice. Speak softly and slowly with natural pauses between sentences, as if reading to a young child at bedtime.\n\n${narrationText}` }],
+          }],
+          generationConfig: {
+            responseModalities: ['audio'],
+            temperature: 1,
+            speech_config: {
+              voice_config: {
+                prebuilt_voice_config: { voice_name: 'Aoede' },
+              },
+            },
+          },
+        }),
+      }
+    );
+
+    if (!res.ok) throw new Error(`TTS API ${res.status}`);
+
+    const chunks   = await res.json();
+    const pcmParts = [];
+
+    for (const chunk of (Array.isArray(chunks) ? chunks : [chunks])) {
+      const parts = chunk?.candidates?.[0]?.content?.parts || [];
+      for (const part of parts) {
+        const inlineData = part.inlineData || part.inline_data;
+        if (inlineData?.data) pcmParts.push(inlineData.data);
+      }
+    }
+
+    if (!pcmParts.length) return null;
+
+    // Decode each chunk from base64 and concatenate as raw PCM bytes
+    const decoded = pcmParts.map(b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+    const totalLen = decoded.reduce((n, a) => n + a.length, 0);
+    const combined = new Uint8Array(totalLen);
+    let off = 0;
+    for (const arr of decoded) { combined.set(arr, off); off += arr.length; }
+
+    // Wrap PCM in a WAV container (24 kHz, mono, 16-bit)
+    const wavBuf    = pcmToWav(combined, 24000, 1, 16);
+    const wavBase64 = uint8ArrayToBase64(new Uint8Array(wavBuf));
+    return `data:audio/wav;base64,${wavBase64}`;
+  } catch (e) {
+    if (e.name !== 'AbortError') console.warn('TTS generation failed:', e.message);
+    return null;
+  } finally {
+    clearTimeout(timerId);
+  }
+}
+
 // ─── Main weave entry point ───────────────────────────────────
-// onProgress(phase, data) — 'text'/null, then 'image'/story, then optionally 'imageRetry'/reason.
+// onProgress(phase, data):
+//   'text'  / null         — text phase starting
+//   'image' / story        — image phase starting (text done)
+//   'imageRetry' / reason  — image retry fallback
+//   'audio' / storyWithImg — audio phase starting (image done, partial story available)
 async function weaveStory(form, existingIds, signal, onProgress) {
   onProgress?.('text', null);
   const story = await textCall(form, existingIds, signal);
@@ -525,7 +577,11 @@ async function weaveStory(form, existingIds, signal, onProgress) {
   const onRetry = (reason) => onProgress?.('imageRetry', reason);
   const image = await imageCall(form, signal, onRetry).catch(() => null);
 
-  return { ...story, type: 'story', coverImage: image, createdAt: Date.now() };
+  const storyWithImage = { ...story, type: 'story', coverImage: image, createdAt: Date.now() };
+  onProgress?.('audio', storyWithImage);
+  const audio = await generateAudio(story, signal);
+
+  return { ...storyWithImage, audioData: audio, audioReady: !!audio };
 }
 
 // ─── Google Drive integration ─────────────────────────────────
@@ -690,6 +746,27 @@ async function driveFetchCover(fileId) {
   });
 }
 
+async function driveUploadAudio(storyId, dataUrl) {
+  await _driveEnsureFolders();
+  const folderId = localStorage.getItem('sw_drive_audio_id');
+  return _driveMultipartUpload(storyId + '-audio.wav', _dataUrlToBlob(dataUrl), folderId);
+}
+
+async function driveFetchAudio(fileId) {
+  const token = await _driveGetToken(false);
+  const res   = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
+    headers: { 'Authorization': 'Bearer ' + token },
+  });
+  if (!res.ok) throw new Error('Drive fetch error ' + res.status);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function driveMigrateCovers(items, onProgress) {
   const queue   = items.filter(i => i.coverImage && !i.coverDriveId);
   const updated = [];
@@ -712,20 +789,80 @@ async function driveGetStorageInfo() {
   return d.storageQuota;
 }
 
+const DRIVE_SYNC_EXCLUDED = new Set(['sw_gemini_key']);
+const DRIVE_SYNC_FILENAME = 'storyweaver-sync.json';
+
+async function drivePushSync() {
+  if (!driveIsConnected()) throw new Error('Google Drive not connected.');
+  await _driveEnsureFolders();
+
+  const lsData = {};
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!DRIVE_SYNC_EXCLUDED.has(key)) lsData[key] = localStorage.getItem(key);
+  }
+  const idbItems = await itemsAll();
+  const payload  = JSON.stringify({ version: 1, localStorage: lsData, indexedDB: idbItems });
+  const token    = await _driveGetToken(false);
+  const rootId   = localStorage.getItem('sw_drive_root_id');
+
+  const q = 'name=\'' + DRIVE_SYNC_FILENAME + '\' and \'' + rootId + '\' in parents and trashed=false';
+  const d = await _driveJsonFetch('/files?q=' + encodeURIComponent(q) + '&fields=files(id)');
+  const fileId = d.files && d.files[0] && d.files[0].id;
+
+  if (fileId) {
+    const res = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + fileId + '?uploadType=media', {
+      method: 'PATCH',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: payload,
+    });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error && e.error.message || 'Drive push failed'); }
+  } else {
+    await _driveMultipartUpload(DRIVE_SYNC_FILENAME, new Blob([payload], { type: 'application/json' }), rootId);
+  }
+}
+
+async function drivePullSync() {
+  if (!driveIsConnected()) throw new Error('Google Drive not connected.');
+  const rootId = localStorage.getItem('sw_drive_root_id');
+  if (!rootId) throw new Error('Drive folders not set up — disconnect and reconnect Drive first.');
+
+  const q = 'name=\'' + DRIVE_SYNC_FILENAME + '\' and \'' + rootId + '\' in parents and trashed=false';
+  const d = await _driveJsonFetch('/files?q=' + encodeURIComponent(q) + '&fields=files(id)');
+  const fileId = d.files && d.files[0] && d.files[0].id;
+  if (!fileId) throw new Error('No sync data found in Google Drive. Save to Drive first.');
+
+  const token = await _driveGetToken(false);
+  const res   = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
+    headers: { 'Authorization': 'Bearer ' + token },
+  });
+  if (!res.ok) throw new Error('Drive pull failed ' + res.status);
+  const parsed = JSON.parse(await res.text());
+
+  if (parsed.localStorage) {
+    for (const [key, value] of Object.entries(parsed.localStorage)) {
+      if (!DRIVE_SYNC_EXCLUDED.has(key)) localStorage.setItem(key, value);
+    }
+  }
+  if (Array.isArray(parsed.indexedDB)) {
+    for (const item of parsed.indexedDB) await itemPut(item);
+  }
+  window.location.reload();
+}
+
 // ─── Export ───────────────────────────────────────────────────
 window.SW = {
   dbOpen, itemsAll, itemPut, itemDelete,
+  audioGet, audioPut, audioDelete,
   getApiKey, setApiKey, hasApiKey, validateApiKey,
-  getTextModel, setTextModel, getImageModel, setImageModel,
+  getTextModel, setTextModel, getImageModel, setImageModel, getAudioModel, setAudioModel,
   getCustomSystemPrompt, setCustomSystemPrompt, getDefaultSystemPrompt,
   getSeedRatings, saveSeedRating,
   getSeedDeletions, deleteSeed,
   getChildName, setChildName, getChildBirthday, setChildBirthday,
   getSampleImage, setSampleImage, clearSampleImage, compressImageForStorage,
   mergeItems, uniqueId, slugify,
-  weaveStory, generateLinkCover,
-  getGithubToken, setGithubToken, getGistId, setGistId,
-  pushToGist, pullFromGist,
+  weaveStory, generateAudio, generateLinkCover,
   drive: {
     isConnected:   driveIsConnected,
     getEmail:      driveGetEmail,
@@ -733,7 +870,11 @@ window.SW = {
     disconnect:    driveDisconnect,
     uploadCover:   driveUploadCover,
     fetchCover:    driveFetchCover,
+    uploadAudio:   driveUploadAudio,
+    fetchAudio:    driveFetchAudio,
     migrateCovers: driveMigrateCovers,
     getStorageInfo: driveGetStorageInfo,
+    pushSync:      drivePushSync,
+    pullSync:      drivePullSync,
   },
 };

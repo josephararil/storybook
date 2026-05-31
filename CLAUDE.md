@@ -84,7 +84,7 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 }
 ```
 
-**AI-generated stories** (persisted in IndexedDB) additionally have:
+**AI-generated stories** (persisted in IndexedDB `items` store) additionally have:
 
 ```js
 {
@@ -92,9 +92,13 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
   type:         'story',
   coverImage:   'data:image/webp;base64,...',  // AI-generated cover, or null
   coverDriveId: 'abc123XYZ',                   // Google Drive file ID (optional; set when Drive is connected)
+  audioReady:   true,                          // true when a WAV narration exists in the 'audio' IDB store
+  audioDriveId: 'abc123XYZ',                   // Google Drive file ID for audio (optional)
   createdAt:    1234567890,                    // Date.now() timestamp
 }
 ```
+
+Audio data (WAV, ~7–12 MB per story) is stored in a **separate IndexedDB object store** (`audio`, key `id`), not in the story object itself, to keep the `items` store lean. `audioReady: true` on the story signals that audio is available locally; `audioDriveId` is set when it has also been uploaded to Drive.
 
 **Link items** (manually added) have:
 
@@ -119,10 +123,14 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 | `itemsAll()` | Load all user-created items from IndexedDB, sorted newest-first |
 | `itemPut(item)` | Upsert an item into IndexedDB |
 | `itemDelete(id)` | Delete an item from IndexedDB |
+| `audioGet(id)` | Load a WAV data URL from the `audio` IDB store by story ID (returns null if absent) |
+| `audioPut(id, dataUrl)` | Upsert a WAV data URL into the `audio` IDB store |
+| `audioDelete(id)` | Delete audio from the `audio` IDB store |
 | `mergeItems(persisted)` | Merge IndexedDB items with seeds (respects deleted seeds) |
 | `getApiKey() / setApiKey(k) / hasApiKey() / validateApiKey(k)` | Gemini API key via localStorage |
 | `getTextModel() / setTextModel(m)` | Text generation model (default `gemini-3.5-flash`) via localStorage `sw_text_model` |
 | `getImageModel() / setImageModel(m)` | Image generation model (default `gemini-3.1-flash-image-preview`) via localStorage `sw_image_model` |
+| `getAudioModel() / setAudioModel(m)` | TTS model (default `gemini-3.1-flash-tts-preview`) via localStorage `sw_audio_model` |
 | `getCustomSystemPrompt() / setCustomSystemPrompt(s)` | Custom system prompt override via localStorage `sw_system_prompt`; empty string clears (uses built-in) |
 | `getDefaultSystemPrompt()` | Returns the built-in `buildSystemPrompt()` rendered with default form values and current child name — used by the UI to populate the prompt editor |
 | `getChildName() / setChildName(n)` | Child's name (default `'Sophie'`) via localStorage |
@@ -134,7 +142,8 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 | `getSeedDeletions()` | Return array of deleted seed IDs |
 | `uniqueId(base, existingIds)` | Generate a unique kebab-case ID |
 | `slugify(title)` | Convert title to kebab-case |
-| `weaveStory(form, existingIds, signal, onProgress)` | Full AI story generation (text then image) |
+| `weaveStory(form, existingIds, signal, onProgress)` | Full AI story generation (text → image → audio); returns `{ ...story, audioData, audioReady }` |
+| `generateAudio(story, signal)` | Calls Gemini TTS (`gemini-3.1-flash-tts-preview`, voice Aoede) to narrate a story; returns a WAV data URL or null |
 | `generateLinkCover(description, signal)` | Generate a cover image for a linked storybook; `description` is a free-text prompt about the book; returns a WebP data URL or throws |
 | `getGithubToken() / setGithubToken(k)` | GitHub PAT for Gist sync via localStorage (`sw_github_token`) — excluded from sync |
 | `getGistId() / setGistId(id)` | Gist ID for cloud sync via localStorage (`sw_gist_id`) |
@@ -146,6 +155,8 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 | `drive.disconnect()` | Revokes the access token and clears all `sw_drive_*` localStorage keys |
 | `drive.uploadCover(storyId, dataUrl)` | Uploads a cover data URL to Drive as `{storyId}-cover.webp` in the covers folder; returns the Drive file ID |
 | `drive.fetchCover(fileId)` | Downloads a file from Drive by ID and returns it as a data URL |
+| `drive.uploadAudio(storyId, dataUrl)` | Uploads a WAV audio data URL to Drive as `{storyId}-audio.wav` in the audio folder; returns the Drive file ID |
+| `drive.fetchAudio(fileId)` | Downloads an audio file from Drive by ID and returns it as a data URL |
 | `drive.migrateCovers(items, onProgress)` | Uploads all items that have `coverImage` but no `coverDriveId`; updates each item in IndexedDB; calls `onProgress({total,done,title})` per item |
 | `drive.getStorageInfo()` | Returns Drive quota object `{limit, usage, usageInDrive}` |
 
@@ -195,7 +206,11 @@ Generation is **sequential** (not parallel) to allow progressive feedback:
 2. **`textCall(form, existingIds, signal)`** — calls `getTextModel()` with `systemInstruction` (custom override or built-in `buildSystemPrompt()`), JSON schema response, and structured user prompt. Returns a parsed story object.
 3. **`onProgress('image', story)`** — signals image phase start (story text is ready; UI can offer "skip image")
 4. **`imageCall(form, signal, onRetry)`** — delegates to `callImageApi`, which tries up to 3 attempts (original + ref image → sanitized prompt + ref image → sanitized prompt, no ref image). Calls `onRetry(reason)` before each fallback; `weaveStory` forwards this as `onProgress('imageRetry', reason)`. Returns a WebP data URL or `null` if all attempts fail.
-5. Returns `{ ...story, type: 'story', coverImage, createdAt }`.
+5. **`onProgress('audio', storyWithImage)`** — signals audio phase start; passes the story+cover so the UI can offer "skip narration". `storyWithImage` already has `type: 'story'` and `createdAt`.
+6. **`generateAudio(story, signal)`** — calls Gemini TTS (`streamGenerateContent`), collects PCM chunks, wraps in a WAV container. Returns a WAV data URL or `null`.
+7. Returns `{ ...story, type: 'story', coverImage, audioData, audioReady, createdAt }`.
+
+`onWeave` in `app.jsx` extracts `audioData` from the result, calls `audioPut(id, audioData)` to store it in the `audio` IDB store, then saves the story (without `audioData`) via `itemPut`.
 
 ### Image Safety & Retry Logic
 
@@ -265,12 +280,13 @@ The Creator screen lifts all form state into `app.jsx`:
 `Weaving` component shows a phase progress list during generation:
 
 - **text phase** — "Writing your story" (spinner)
-- **image phase** — "Painting the cover" (spinner); "Skip image · Read now" button appears (only when `onSkipImage` prop provided, which requires `weavingStory` to be set)
+- **image phase** — "Painting the cover" (spinner); "Skip image · Read now" button appears when `onSkipImage` prop provided and `weavingStory` is set
+- **audio phase** — "Recording narration" (spinner); "Skip narration · Read now" button appears (same `onSkipImage` prop; label changes by phase)
 - **Cancel** button always visible
 - Elapsed time counter (shown after 2s)
 - Error state auto-dismisses after 4s and navigates back to `/create`
 
-Race conditions are handled via `ignoreWeaveRef` (a `useRef`): set to `true` on cancel or skip before any async continuation checks it.
+Race conditions are handled via `ignoreWeaveRef` (a `useRef`): set to `true` on cancel or skip before any async continuation checks it. `onSkipImage` also calls `abortRef.current.abort()` to immediately cancel in-flight generation.
 
 ## AddLinkModal (Link a Storybook)
 
