@@ -91,8 +91,16 @@ function StoryWeaverApp() {
   const [weavePhase,    setWeavePhase]    = React.useState(null);
   const [weavingStory,  setWeavingStory]  = React.useState(null);
   const [weavingSubMsg, setWeavingSubMsg] = React.useState(null);
+  const [toasts,        setToasts]        = React.useState([]);
   const abortRef         = React.useRef(null);
   const ignoreWeaveRef   = React.useRef(false);
+
+  const addToast = (msg, type = 'error') => {
+    const id = Date.now();
+    setToasts(prev => [...prev, { id, msg, type }]);
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 7000);
+  };
+  const dismissToast = (id) => setToasts(prev => prev.filter(t => t.id !== id));
 
   // ─── Route parsing ────────────────────────────────────────
   const tab =
@@ -142,48 +150,64 @@ function StoryWeaverApp() {
           }
           setWeavePhase(phase);
           setWeavingSubMsg(null);
-          if ((phase === 'image' || phase === 'audio') && data) setWeavingStory(data);
+          // imagePending = text done, image still running — store partial story for skip
+          if (phase === 'imagePending' && data) setWeavingStory(data);
         }
       );
       if (ignoreWeaveRef.current) return;
 
-      // Extract audio separately — don't persist the large blob in the items store
-      const { audioData, ...story } = result;
-      if (audioData) await window.SW.audioPut(story.id, audioData);
+      // audioPromise resolves in background — extract it before saving
+      const { audioPromise, ...story } = result;
       await window.SW.itemPut(story);
       setItems(prev => [story, ...prev]);
 
-      // Non-blocking Drive backups — read latest state to avoid field-collision race
-      if (window.SW.drive.isConnected()) {
-        if (story.coverImage) {
-          window.SW.drive.uploadCover(story.id, story.coverImage)
-            .then(coverDriveId => {
-              setItems(prev => {
-                const cur = prev.find(i => i.id === story.id);
-                if (!cur) return prev;
-                const upd = Object.assign({}, cur, { coverDriveId });
-                window.SW.itemPut(upd);
-                return prev.map(i => i.id === story.id ? upd : i);
-              });
-            })
-            .catch(() => {});
-        }
-        if (audioData) {
-          window.SW.drive.uploadAudio(story.id, audioData)
-            .then(audioDriveId => {
-              setItems(prev => {
-                const cur = prev.find(i => i.id === story.id);
-                if (!cur) return prev;
-                const upd = Object.assign({}, cur, { audioDriveId });
-                window.SW.itemPut(upd);
-                return prev.map(i => i.id === story.id ? upd : i);
-              });
-            })
-            .catch(() => {});
-        }
+      // Navigate to story immediately — image is ready, audio continues in background
+      navigate('/story/' + story.id);
+      abortRef.current = null;
+
+      // Non-blocking cover backup to Drive
+      if (window.SW.drive.isConnected() && story.coverImage) {
+        window.SW.drive.uploadCover(story.id, story.coverImage)
+          .then(coverDriveId => {
+            setItems(prev => {
+              const cur = prev.find(i => i.id === story.id);
+              if (!cur) return prev;
+              const upd = Object.assign({}, cur, { coverDriveId });
+              window.SW.itemPut(upd);
+              return prev.map(i => i.id === story.id ? upd : i);
+            });
+          })
+          .catch(() => {});
       }
 
-      navigate('/story/' + story.id);
+      // Wait for audio in background — update story once ready
+      if (audioPromise) {
+        audioPromise.then(async (audioData) => {
+          if (!audioData) return;
+          await window.SW.audioPut(story.id, audioData);
+          const withAudio = Object.assign({}, story, { audioReady: true });
+          await window.SW.itemPut(withAudio);
+          setItems(prev => prev.map(i => i.id === story.id ? withAudio : i));
+
+          if (window.SW.drive.isConnected()) {
+            window.SW.drive.uploadAudio(story.id, audioData)
+              .then(audioDriveId => {
+                setItems(prev => {
+                  const cur = prev.find(i => i.id === story.id);
+                  if (!cur) return prev;
+                  const upd = Object.assign({}, cur, { audioDriveId });
+                  window.SW.itemPut(upd);
+                  return prev.map(i => i.id === story.id ? upd : i);
+                });
+              })
+              .catch(() => {});
+          }
+        }).catch((err) => {
+          if (err && err.name !== 'AbortError') {
+            addToast(`Audio narration failed: ${err.message || 'Unknown error'}`);
+          }
+        });
+      }
     } catch (err) {
       if (ignoreWeaveRef.current) return;
       if (err.name === 'AbortError') { navigate('/create'); return; }
@@ -207,9 +231,8 @@ function StoryWeaverApp() {
     const partial = weavingStory;
     if (!partial) return;
     ignoreWeaveRef.current = true;
-    if (abortRef.current) abortRef.current.abort(); // cancel ongoing generation
-    // Spread order: defaults first, then partial wins (preserves type/createdAt if already set)
-    const story = { type: 'story', createdAt: Date.now(), ...partial };
+    if (abortRef.current) abortRef.current.abort(); // cancel image + audio in progress
+    const story = { type: 'story', createdAt: Date.now(), ...partial, audioReady: false };
     await window.SW.itemPut(story);
     setItems(prev => [story, ...prev]);
     setWeavingStory(null);
@@ -351,6 +374,8 @@ function StoryWeaverApp() {
           item={editingLink}
         />
       )}
+
+      <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

@@ -1165,6 +1165,35 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
   );
 }
 
+// ─── Toast notifications ──────────────────────────────────────
+function Toast({ toasts, onDismiss }) {
+  if (!toasts || !toasts.length) return null;
+  return (
+    <div style={{ position: 'fixed', bottom: 110, left: 16, right: 16, zIndex: 500, display: 'flex', flexDirection: 'column', gap: 8, pointerEvents: 'none' }}>
+      {toasts.map(t => (
+        <div key={t.id} style={{
+          display: 'flex', alignItems: 'flex-start', gap: 10,
+          padding: '12px 14px', borderRadius: 14,
+          background: t.type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(74,222,128,0.12)',
+          border: `1px solid ${t.type === 'error' ? 'rgba(239,68,68,0.4)' : 'rgba(74,222,128,0.35)'}`,
+          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+          color: t.type === 'error' ? '#fca5a5' : '#4ade80',
+          fontFamily: '"Nunito", system-ui', fontSize: 13, fontWeight: 600, lineHeight: 1.45,
+          boxShadow: '0 4px 20px rgba(0,0,0,0.45)',
+          pointerEvents: 'auto',
+          animation: 'sw-fadein 0.3s ease-out',
+        }}>
+          <span style={{ flex: 1 }}>{t.msg}</span>
+          <button onClick={() => onDismiss(t.id)} style={{
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            color: 'inherit', opacity: 0.65, padding: '0 2px', flexShrink: 0, fontSize: 16, lineHeight: 1,
+          }}>×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Weaving (loading / error) ────────────────────────────────
 function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
   const childName = window.SW?.getChildName() || 'your child';
@@ -1182,8 +1211,25 @@ function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
     { key: 'image', label: 'Painting the cover'   },
     { key: 'audio', label: 'Recording narration'  },
   ];
-  const currentIdx = phases.findIndex(p => p.key === phase);
-  const getState   = (i) => i < currentIdx ? 'done' : i === currentIdx ? 'active' : 'pending';
+
+  // Parallel-aware state: 'text' phase = text + image both active simultaneously.
+  // 'imagePending' = text done, image + audio both active.
+  const getState = (key) => {
+    if (phase === 'text') {
+      if (key === 'text' || key === 'image') return 'active';
+      return 'pending';
+    }
+    if (phase === 'imagePending') {
+      if (key === 'text') return 'done';
+      if (key === 'image' || key === 'audio') return 'active';
+      return 'pending';
+    }
+    // Legacy fallback for other phase strings
+    const currentIdx = phases.findIndex(p => p.key === phase);
+    const i = phases.findIndex(p => p.key === key);
+    return i < currentIdx ? 'done' : i === currentIdx ? 'active' : 'pending';
+  };
+
   const fmtElapsed = (s) => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 
   const container = {
@@ -1294,15 +1340,15 @@ function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
           </div>
         )}
 
-        {/* Skip button — shown in image and audio phases */}
-        {(phase === 'image' || phase === 'audio') && onSkipImage && (
+        {/* Skip button — shown once story text is ready */}
+        {(phase === 'imagePending' || phase === 'image' || phase === 'audio') && onSkipImage && (
           <button onClick={onSkipImage} style={{
             marginTop: 24, padding: '12px 26px', borderRadius: 14,
             background: t.accentSoft, border: `1px solid ${t.accent}55`,
             color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
             cursor: 'pointer', animation: 'sw-fadein 0.5s ease-out forwards',
           }}>
-            {phase === 'audio' ? 'Skip narration · Read now' : 'Skip image · Read now'}
+            {phase === 'audio' ? 'Skip narration · Read now' : 'Skip cover · Read now'}
           </button>
         )}
 
@@ -1331,9 +1377,13 @@ function ApiKeyModal({ t, open, onClose }) {
 
   const [textModel,   setTextModelLocal]  = useState(() => window.SW.getTextModel());
   const [imageModel,  setImageModelLocal] = useState(() => window.SW.getImageModel());
+  const [audioModel,  setAudioModelLocal] = useState(() => window.SW.getAudioModel());
+  const [audioVoice,  setAudioVoiceLocal] = useState(() => window.SW.getAudioVoice());
 
-  const [sysPrompt,   setSysPrompt]   = useState(() => window.SW.getCustomSystemPrompt());
-  const [promptSaved, setPromptSaved] = useState(false);
+  const [sysPrompt,      setSysPrompt]      = useState(() => window.SW.getCustomSystemPrompt());
+  const [promptSaved,    setPromptSaved]    = useState(false);
+  const [audioSysPrompt, setAudioSysPrompt] = useState(() => window.SW.getAudioSystemPrompt());
+  const [audioPromptSaved, setAudioPromptSaved] = useState(false);
 
   if (!open) return null;
 
@@ -1363,6 +1413,18 @@ function ApiKeyModal({ t, open, onClose }) {
     else     setImageModelLocal(window.SW.getImageModel());
   };
 
+  const handleAudioModelBlur = () => {
+    const val = audioModel.trim();
+    if (val) window.SW.setAudioModel(val);
+    else     setAudioModelLocal(window.SW.getAudioModel());
+  };
+
+  const handleAudioVoiceBlur = () => {
+    const val = audioVoice.trim();
+    if (val) window.SW.setAudioVoice(val);
+    else     setAudioVoiceLocal(window.SW.getAudioVoice());
+  };
+
   const handleLoadDefault = () => {
     setSysPrompt(window.SW.getDefaultSystemPrompt());
     setPromptSaved(false);
@@ -1379,6 +1441,24 @@ function ApiKeyModal({ t, open, onClose }) {
     window.SW.setCustomSystemPrompt(sysPrompt.trim());
     setPromptSaved(true);
     setTimeout(() => setPromptSaved(false), 2500);
+  };
+
+  const handleLoadDefaultAudio = () => {
+    setAudioSysPrompt(window.SW.getDefaultAudioSystemPrompt());
+    setAudioPromptSaved(false);
+  };
+
+  const handleClearAudioPrompt = () => {
+    setAudioSysPrompt('');
+    window.SW.setAudioSystemPrompt('');
+    setAudioPromptSaved(true);
+    setTimeout(() => setAudioPromptSaved(false), 2500);
+  };
+
+  const handleSaveAudioPrompt = () => {
+    window.SW.setAudioSystemPrompt(audioSysPrompt.trim());
+    setAudioPromptSaved(true);
+    setTimeout(() => setAudioPromptSaved(false), 2500);
   };
 
   const sectionLabel = {
@@ -1475,13 +1555,50 @@ function ApiKeyModal({ t, open, onClose }) {
             />
           </div>
 
-          <div>
+          <div style={{ marginBottom: 14 }}>
             <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 6 }}>Image generation</div>
             <input
               type="text"
               value={imageModel}
               onChange={(e) => setImageModelLocal(e.target.value)}
               onBlur={handleImageModelBlur}
+              style={monoInput}
+            />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 6 }}>Audio narration</div>
+            <input
+              type="text"
+              value={audioModel}
+              onChange={(e) => setAudioModelLocal(e.target.value)}
+              onBlur={handleAudioModelBlur}
+              style={monoInput}
+            />
+          </div>
+
+          <div>
+            <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 8 }}>TTS Voice</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+              {['Aoede', 'Charon', 'Fenrir', 'Kore', 'Puck', 'Zephyr'].map(v => {
+                const active = audioVoice === v;
+                return (
+                  <button key={v} onClick={() => { setAudioVoiceLocal(v); window.SW.setAudioVoice(v); }} style={{
+                    padding: '5px 12px', borderRadius: 999, cursor: 'pointer',
+                    background: active ? t.accentSoft : 'transparent',
+                    color: active ? t.accent : t.textMuted,
+                    border: active ? `1px solid ${t.accent}44` : `1px solid ${t.glassBorder}`,
+                    fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+                  }}>{v}</button>
+                );
+              })}
+            </div>
+            <input
+              type="text"
+              value={audioVoice}
+              onChange={(e) => setAudioVoiceLocal(e.target.value)}
+              onBlur={handleAudioVoiceBlur}
+              placeholder="Custom voice name…"
               style={monoInput}
             />
           </div>
@@ -1543,6 +1660,60 @@ function ApiKeyModal({ t, open, onClose }) {
               color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
             }}
           >{sysPrompt.trim() ? 'Save Prompt Override' : 'Save (use built-in)'}</button>
+        </div>
+
+        {/* ── Audio Narration Prompt ── */}
+        <div style={fieldBox}>
+          <label style={sectionLabel}>Audio Narration Prompt</label>
+          <div style={{ fontFamily: t.fontBody, fontSize: 13, color: t.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
+            Instructions sent to the TTS model. Controls narration style, pacing, and tone. Leave blank to use the built-in default.
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <button onClick={handleLoadDefaultAudio} style={{
+              padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+              background: t.accentSoft, border: `1px solid ${t.accent}44`,
+              color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+            }}>Load default</button>
+            {audioSysPrompt.trim() && (
+              <button onClick={handleClearAudioPrompt} style={{
+                padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+                background: 'transparent', border: '1px solid rgba(248,113,113,0.35)',
+                color: '#f87171', fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+              }}>Clear override</button>
+            )}
+          </div>
+
+          <textarea
+            value={audioSysPrompt}
+            onChange={(e) => { setAudioSysPrompt(e.target.value); setAudioPromptSaved(false); }}
+            placeholder={"Leave blank to use the built-in narration instructions.\nClick 'Load default' to view and edit the current default."}
+            rows={5}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              border: `1px solid ${t.glassBorder}`, outline: 'none',
+              background: 'rgba(255,255,255,0.04)', borderRadius: 10,
+              color: t.text, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.65,
+              padding: 12, resize: 'vertical', colorScheme: 'dark',
+            }}
+          />
+
+          {audioPromptSaved && (
+            <div style={{ marginTop: 8, color: '#4ade80', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Icon name="check" size={14} stroke={2.5} /> {audioSysPrompt.trim() ? 'Audio prompt saved' : 'Using built-in audio prompt'}
+            </div>
+          )}
+
+          <button
+            onClick={handleSaveAudioPrompt}
+            style={{
+              marginTop: 12, width: '100%',
+              border: `1px solid ${t.accent}44`, cursor: 'pointer',
+              padding: '13px 24px', borderRadius: 12,
+              background: t.accentSoft,
+              color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
+            }}
+          >{audioSysPrompt.trim() ? 'Save Audio Prompt' : 'Save (use built-in)'}</button>
         </div>
 
       </div>
@@ -1795,4 +1966,4 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
   );
 }
 
-Object.assign(window, { Library, Creator, Settings, Reader, Weaving, BottomNav, ApiKeyModal, AddLinkModal });
+Object.assign(window, { Library, Creator, Settings, Reader, Weaving, BottomNav, ApiKeyModal, AddLinkModal, Toast });

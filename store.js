@@ -2,8 +2,8 @@
 // Exports window.SW — must load after data.js, before cover.jsx / screens.jsx / app.jsx
 
 const DEFAULT_TEXT_MODEL  = "gemini-3.5-flash";
-const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
-const DEFAULT_AUDIO_MODEL = "gemini-3.1-flash-tts-preview";
+const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
+const DEFAULT_AUDIO_MODEL = "gemini-2.5-flash-preview-tts";
 
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
@@ -92,6 +92,16 @@ function getImageModel()  { return localStorage.getItem('sw_image_model') || DEF
 function setImageModel(m) { localStorage.setItem('sw_image_model', m); }
 function getAudioModel()  { return localStorage.getItem('sw_audio_model') || DEFAULT_AUDIO_MODEL; }
 function setAudioModel(m) { localStorage.setItem('sw_audio_model', m); }
+function getAudioVoice()  { return localStorage.getItem('sw_audio_voice') || 'Zephyr'; }
+function setAudioVoice(v) { localStorage.setItem('sw_audio_voice', v); }
+function getAudioSystemPrompt()  { return localStorage.getItem('sw_audio_sys_prompt') || ''; }
+function setAudioSystemPrompt(s) {
+  if (s) localStorage.setItem('sw_audio_sys_prompt', s);
+  else   localStorage.removeItem('sw_audio_sys_prompt');
+}
+function getDefaultAudioSystemPrompt() {
+  return "Read the following transcript based on the audio profile and director's note.\n\n# Audio Profile\nA deep, resonant narrator of mysteries.\n\n# Director's note\nStyle: Warm, understanding, soft tone with gentle inflections. Pace: Slow, liquid, zero urgency. Long pauses for breath. Accent: British (RP).\n\n## Scene:\nA quiet children bedroom, low light, with an attentive 4 year old listening to every word\n\n## Sample Context:\nRead this children's bedtime story in a warm, gentle narrator's voice. Speak softly and slowly with natural pauses between sentences, as if reading to a young child at bedtime\n\n## Transcript:";
+}
 
 // ─── Custom system prompt helpers ─────────────────────────────
 function getCustomSystemPrompt()  { return localStorage.getItem('sw_system_prompt') || ''; }
@@ -370,10 +380,7 @@ async function textCall(form, existingIds, signal) {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    if (res.status === 400 || res.status === 403) {
-      throw new Error('Gemini rejected the request (check your API key).');
-    }
-    throw new Error(body?.error?.message || 'Gemini returned an unexpected response. Please try again.');
+    throw new Error(`API response ${res.status}: ${body?.error?.message || 'Unknown error'}`);
   }
 
   const data = await res.json();
@@ -428,7 +435,10 @@ async function callImageApiOnce(prompt, signal, useRefImage, timeoutMs) {
         }),
       }
     );
-    if (!res.ok) throw new Error(`API ${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(`API response ${res.status}: ${errBody?.error?.message || 'Unknown error'}`);
+    }
     const data     = await res.json();
     const resParts = data?.candidates?.[0]?.content?.parts || [];
     const imgPart  = resParts.find(p => p.inlineData || p.inline_data);
@@ -504,6 +514,8 @@ async function generateAudio(story, signal) {
   const timerId = setTimeout(() => ctrl.abort(), 120000);
   if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
 
+  const ttsPrompt = getAudioSystemPrompt() || getDefaultAudioSystemPrompt();
+
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${getAudioModel()}:streamGenerateContent`,
@@ -514,14 +526,14 @@ async function generateAudio(story, signal) {
         body: JSON.stringify({
           contents: [{
             role: 'user',
-            parts: [{ text: `Read this children's bedtime story in a warm, gentle narrator's voice. Speak softly and slowly with natural pauses between sentences, as if reading to a young child at bedtime.\n\n${narrationText}` }],
+            parts: [{ text: `${ttsPrompt}\n\n${narrationText}` }],
           }],
           generationConfig: {
             responseModalities: ['audio'],
             temperature: 1,
             speech_config: {
               voice_config: {
-                prebuilt_voice_config: { voice_name: 'Aoede' },
+                prebuilt_voice_config: { voice_name: getAudioVoice() },
               },
             },
           },
@@ -529,7 +541,10 @@ async function generateAudio(story, signal) {
       }
     );
 
-    if (!res.ok) throw new Error(`TTS API ${res.status}`);
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      throw new Error(`API response ${res.status}: ${errBody?.error?.message || 'Unknown error'}`);
+    }
 
     const chunks   = await res.json();
     const pcmParts = [];
@@ -565,23 +580,30 @@ async function generateAudio(story, signal) {
 
 // ─── Main weave entry point ───────────────────────────────────
 // onProgress(phase, data):
-//   'text'  / null         — text phase starting
-//   'image' / story        — image phase starting (text done)
-//   'imageRetry' / reason  — image retry fallback
-//   'audio' / storyWithImg — audio phase starting (image done, partial story available)
+//   'text'         / null   — text + image both starting (parallel)
+//   'imageRetry'   / reason — image retry fallback
+//   'imagePending' / story  — text done, image still running, audio now started
+// Returns { ...story, audioPromise, audioReady: false } — caller awaits audioPromise separately.
 async function weaveStory(form, existingIds, signal, onProgress) {
   onProgress?.('text', null);
+
+  // Start image immediately — runs in parallel with text
+  const imageOnRetry = (reason) => onProgress?.('imageRetry', reason);
+  const imagePromise = imageCall(form, signal, imageOnRetry).catch(() => null);
+
+  // Await text — audio generation needs the story content
   const story = await textCall(form, existingIds, signal);
 
-  onProgress?.('image', story);
-  const onRetry = (reason) => onProgress?.('imageRetry', reason);
-  const image = await imageCall(form, signal, onRetry).catch(() => null);
+  // Start audio right after text completes (does not wait for image)
+  const audioPromise = generateAudio(story, signal).catch(() => null);
+  onProgress?.('imagePending', story);
 
+  // Wait for image
+  const image = await imagePromise;
   const storyWithImage = { ...story, type: 'story', coverImage: image, createdAt: Date.now() };
-  onProgress?.('audio', storyWithImage);
-  const audio = await generateAudio(story, signal);
 
-  return { ...storyWithImage, audioData: audio, audioReady: !!audio };
+  // Return immediately with audioPromise — caller handles background audio
+  return { ...storyWithImage, audioPromise, audioReady: false };
 }
 
 // ─── Google Drive integration ─────────────────────────────────
@@ -856,6 +878,7 @@ window.SW = {
   audioGet, audioPut, audioDelete,
   getApiKey, setApiKey, hasApiKey, validateApiKey,
   getTextModel, setTextModel, getImageModel, setImageModel, getAudioModel, setAudioModel,
+  getAudioVoice, setAudioVoice, getAudioSystemPrompt, setAudioSystemPrompt, getDefaultAudioSystemPrompt,
   getCustomSystemPrompt, setCustomSystemPrompt, getDefaultSystemPrompt,
   getSeedRatings, saveSeedRating,
   getSeedDeletions, deleteSeed,

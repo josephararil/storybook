@@ -50,7 +50,7 @@ data.js → sophie.js → store.js → cover.jsx → screens.jsx → app.jsx
 | `sophie.js` | Hardcoded Sophie reference photo as `window.SOPHIE_IMAGE` (base64 JPEG, ~92 KB); plain `<script>`, not Babel |
 | `store.js` | All persistence and API logic; exports `window.SW`; IndexedDB wrapper, Gemini API calls, seed deletion, child profile, image compression, Google Drive integration |
 | `cover.jsx` | Procedural SVG story cover art; 8 scene types; 3 render modes |
-| `screens.jsx` | All app screens: Library, Creator, Settings, Reader, Weaving, ApiKeyModal, AddLinkModal; inline `Icon` component |
+| `screens.jsx` | All app screens: Library, Creator, Settings, Reader, Weaving, ApiKeyModal, AddLinkModal, Toast; inline `Icon` component |
 | `app.jsx` | Root `StoryWeaverApp`; theme object; hash routing; lifted state; all event handlers |
 | `sw.js` | Service worker — network-first for app files (updates always propagate), cache-first for CDN assets (pinned versions) |
 | `manifest.webmanifest` | PWA install metadata |
@@ -131,7 +131,10 @@ Audio data (WAV, ~7–12 MB per story) is stored in a **separate IndexedDB objec
 | `getTextModel() / setTextModel(m)` | Text generation model (default `gemini-3.5-flash`) via localStorage `sw_text_model` |
 | `getImageModel() / setImageModel(m)` | Image generation model (default `gemini-3.1-flash-image-preview`) via localStorage `sw_image_model` |
 | `getAudioModel() / setAudioModel(m)` | TTS model (default `gemini-3.1-flash-tts-preview`) via localStorage `sw_audio_model` |
-| `getCustomSystemPrompt() / setCustomSystemPrompt(s)` | Custom system prompt override via localStorage `sw_system_prompt`; empty string clears (uses built-in) |
+| `getAudioVoice() / setAudioVoice(v)` | TTS voice name (default `'Aoede'`) via localStorage `sw_audio_voice` |
+| `getAudioSystemPrompt() / setAudioSystemPrompt(s)` | TTS narration instructions override via localStorage `sw_audio_sys_prompt`; empty uses built-in |
+| `getDefaultAudioSystemPrompt()` | Returns the built-in TTS narration prompt |
+| `getCustomSystemPrompt() / setCustomSystemPrompt(s)` | Custom story system prompt override via localStorage `sw_system_prompt`; empty string clears (uses built-in) |
 | `getDefaultSystemPrompt()` | Returns the built-in `buildSystemPrompt()` rendered with default form values and current child name — used by the UI to populate the prompt editor |
 | `getChildName() / setChildName(n)` | Child's name (default `'Sophie'`) via localStorage |
 | `getChildBirthday() / setChildBirthday(d)` | Birthday via localStorage |
@@ -142,7 +145,7 @@ Audio data (WAV, ~7–12 MB per story) is stored in a **separate IndexedDB objec
 | `getSeedDeletions()` | Return array of deleted seed IDs |
 | `uniqueId(base, existingIds)` | Generate a unique kebab-case ID |
 | `slugify(title)` | Convert title to kebab-case |
-| `weaveStory(form, existingIds, signal, onProgress)` | Full AI story generation (text → image → audio); returns `{ ...story, audioData, audioReady }` |
+| `weaveStory(form, existingIds, signal, onProgress)` | Parallel AI story generation: text + image run simultaneously; audio starts as soon as text finishes. Returns `{ ...story, audioPromise, audioReady: false }` — caller awaits `audioPromise` in the background after navigating to the story. |
 | `generateAudio(story, signal)` | Calls Gemini TTS (`gemini-3.1-flash-tts-preview`, voice Aoede) to narrate a story; returns a WAV data URL or null |
 | `generateLinkCover(description, signal)` | Generate a cover image for a linked storybook; `description` is a free-text prompt about the book; returns a WebP data URL or throws |
 | `getGithubToken() / setGithubToken(k)` | GitHub PAT for Gist sync via localStorage (`sw_github_token`) — excluded from sync |
@@ -167,7 +170,9 @@ Audio data (WAV, ~7–12 MB per story) is stored in a **separate IndexedDB objec
 | `sw_drive_email` | Connected Google account email; presence indicates connected state |
 | `sw_drive_root_id` | Drive folder ID for `StoryWeaver/` |
 | `sw_drive_covers_id` | Drive folder ID for `StoryWeaver/covers/` |
-| `sw_drive_audio_id` | Drive folder ID for `StoryWeaver/audio/` (reserved for future TTS files) |
+| `sw_drive_audio_id` | Drive folder ID for `StoryWeaver/audio/` |
+| `sw_audio_voice` | TTS voice name (default `'Aoede'`) |
+| `sw_audio_sys_prompt` | TTS narration instructions override; absent = use built-in |
 
 All Drive keys are included in Gist sync (not sensitive — no tokens stored). The OAuth2 access token lives in memory only and expires after 1 hour; re-auth triggers a brief Google popup.
 
@@ -200,15 +205,19 @@ Do not inline this logic into callers; add new image call sites by calling `call
 
 ### Story Generation Flow (`weaveStory`)
 
-Generation is **sequential** (not parallel) to allow progressive feedback:
+Generation is **parallel** — text and image run simultaneously; audio starts as soon as text is done:
 
-1. **`onProgress('text', null)`** — signals text phase start
-2. **`textCall(form, existingIds, signal)`** — calls `getTextModel()` with `systemInstruction` (custom override or built-in `buildSystemPrompt()`), JSON schema response, and structured user prompt. Returns a parsed story object.
-3. **`onProgress('image', story)`** — signals image phase start (story text is ready; UI can offer "skip image")
-4. **`imageCall(form, signal, onRetry)`** — delegates to `callImageApi`, which tries up to 3 attempts (original + ref image → sanitized prompt + ref image → sanitized prompt, no ref image). Calls `onRetry(reason)` before each fallback; `weaveStory` forwards this as `onProgress('imageRetry', reason)`. Returns a WebP data URL or `null` if all attempts fail.
-5. **`onProgress('audio', storyWithImage)`** — signals audio phase start; passes the story+cover so the UI can offer "skip narration". `storyWithImage` already has `type: 'story'` and `createdAt`.
-6. **`generateAudio(story, signal)`** — calls Gemini TTS (`streamGenerateContent`), collects PCM chunks, wraps in a WAV container. Returns a WAV data URL or `null`.
-7. Returns `{ ...story, type: 'story', coverImage, audioData, audioReady, createdAt }`.
+1. **`onProgress('text', null)`** — signals both text and image are starting (shown as parallel spinners in Weaving screen)
+2. **`textCall` + `imageCall` in parallel** — text and image fire simultaneously. `imageCall` delegates to `callImageApi` (3-attempt retry with sanitized prompts). `onProgress('imageRetry', reason)` is emitted on each fallback.
+3. **`textCall` resolves** → `generateAudio(story, signal)` starts immediately (does not wait for image). Audio runs in background.
+4. **`onProgress('imagePending', story)`** — text done, image still running, audio running. UI stores `story` so user can skip at any time.
+5. **`imageCall` resolves** → `weaveStory` returns `{ ...story, type: 'story', coverImage, createdAt, audioPromise, audioReady: false }`.
+6. **`onWeave` in `app.jsx`** saves the story (without audio), navigates to reader immediately, then awaits `audioPromise` in the background. When audio resolves, `audioPut` + `itemPut` update `audioReady: true` and the listener button appears.
+
+`onProgress` phase keys:
+- `'text'` / null — both text + image starting
+- `'imageRetry'` / reason — image retry fallback
+- `'imagePending'` / story — text done, audio started, image still running
 
 `onWeave` in `app.jsx` extracts `audioData` from the result, calls `audioPut(id, audioData)` to store it in the `audio` IDB store, then saves the story (without `audioData`) via `itemPut`.
 
@@ -248,11 +257,12 @@ If a custom system prompt is saved via the AI Configuration panel (`sw_system_pr
 
 ### AI Configuration Panel (`ApiKeyModal` component)
 
-Opened from Settings → **Gemini AI** row. A full-screen scrollable overlay with three sections:
+Opened from Settings → **Gemini AI** row. A full-screen scrollable overlay with four sections:
 
 1. **API Key** — validates against Gemini's `/v1beta/models` endpoint before saving
-2. **AI Models** — editable text inputs for `getTextModel()` / `getImageModel()`; saves on blur
-3. **System Prompt** — textarea for `getCustomSystemPrompt()`; "Load default" button populates it with the current built-in prompt; "Clear override" removes the override; "Save Prompt Override" commits it. The custom prompt (if set) is included in Gist sync.
+2. **AI Models** — editable text inputs for text, image, and audio models; plus TTS voice selector (chip presets: Aoede, Charon, Fenrir, Kore, Puck, Zephyr) with free-text fallback; all save on blur/click
+3. **System Prompt** — textarea for `getCustomSystemPrompt()`; "Load default" populates built-in prompt; "Clear override" reverts to built-in; saves on button click
+4. **Audio Narration Prompt** — textarea for `getAudioSystemPrompt()`; same load/clear/save pattern; controls TTS narration style and pacing
 
 ## Child Name
 
@@ -277,16 +287,21 @@ The Creator screen lifts all form state into `app.jsx`:
 
 ## Weaving Screen (Loading State)
 
-`Weaving` component shows a phase progress list during generation:
+`Weaving` component shows a phase progress list during generation. Phases reflect parallel execution:
 
-- **text phase** — "Writing your story" (spinner)
-- **image phase** — "Painting the cover" (spinner); "Skip image · Read now" button appears when `onSkipImage` prop provided and `weavingStory` is set
-- **audio phase** — "Recording narration" (spinner); "Skip narration · Read now" button appears (same `onSkipImage` prop; label changes by phase)
+- **phase `'text'`** — "Writing your story" + "Painting the cover" **both show active spinners** (running in parallel)
+- **phase `'imagePending'`** — "Writing your story" shows ✓, "Painting the cover" + "Recording narration" both show spinners. "Skip cover · Read now" button appears when `onSkipImage` prop is non-null.
 - **Cancel** button always visible
 - Elapsed time counter (shown after 2s)
 - Error state auto-dismisses after 4s and navigates back to `/create`
 
-Race conditions are handled via `ignoreWeaveRef` (a `useRef`): set to `true` on cancel or skip before any async continuation checks it. `onSkipImage` also calls `abortRef.current.abort()` to immediately cancel in-flight generation.
+`getState(key)` in `Weaving` maps phase string → per-row state (`'done'`, `'active'`, `'pending'`) with special logic for parallel phases.
+
+Race conditions are handled via `ignoreWeaveRef` (a `useRef`): set to `true` on cancel or skip before any async continuation checks it. `onSkipImage` calls `abortRef.current.abort()` to immediately cancel image + audio in-flight.
+
+## Toast Notifications
+
+`Toast({ toasts, onDismiss })` in `screens.jsx` renders error/success banners above the bottom nav. `addToast(msg, type)` in `app.jsx` auto-dismisses after 7s. Used for background failures (audio narration) that can't surface through the Weaving screen.
 
 ## AddLinkModal (Link a Storybook)
 
