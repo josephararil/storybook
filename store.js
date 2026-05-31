@@ -295,7 +295,9 @@ function guessScene(context) {
 
 // ─── Gemini API calls ─────────────────────────────────────────
 function buildSystemPrompt(form, childName, targetParas) {
-  const toneWord = TONE_WORDS[(form.tone || 3) - 1];
+  const toneWord = typeof form.tone === 'string'
+    ? (form.tone.trim() || 'Gentle')
+    : (TONE_WORDS[(form.tone || 3) - 1] || 'Gentle');
 
   const companionLine = form.character?.trim()
     ? `Companion: ${childName} meets ${form.character.trim()}. The meeting is warm and joyful. No other characters.`
@@ -361,7 +363,7 @@ function getDefaultSystemPrompt() {
 }
 
 async function textCall(form, existingIds, signal) {
-  const toneWord    = TONE_WORDS[form.tone - 1];
+  const toneWord    = typeof form.tone === 'string' ? (form.tone.trim() || 'Gentle') : (TONE_WORDS[form.tone - 1] || 'Gentle');
   const childName   = getChildName();
   const targetParas = Math.max(4, Math.round(form.length / 0.65));
   const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
@@ -417,11 +419,14 @@ async function textCall(form, existingIds, signal) {
 // Single image API attempt. useRefImage controls whether the reference photo is attached.
 async function callImageApiOnce(prompt, signal, useRefImage, timeoutMs) {
   const refImage = useRefImage ? (() => {
-    if (window.SOPHIE_IMAGE?.data) return window.SOPHIE_IMAGE;
+    // User-uploaded image takes priority over the hardcoded Sophie photo
     const s = getSampleImage();
-    if (!s) return null;
-    const m = s.match(/^data:(image\/[^;]+);base64,(.+)$/);
-    return m ? { mimeType: m[1], data: m[2] } : null;
+    if (s) {
+      const m = s.match(/^data:(image\/[^;]+);base64,(.+)$/);
+      if (m) return { mimeType: m[1], data: m[2] };
+    }
+    if (window.SOPHIE_IMAGE?.data) return window.SOPHIE_IMAGE;
+    return null;
   })() : null;
 
   const parts = [{ text: prompt }];
@@ -448,9 +453,11 @@ async function callImageApiOnce(prompt, signal, useRefImage, timeoutMs) {
       const errBody = await res.json().catch(() => ({}));
       throw new Error(`API response ${res.status}: ${errBody?.error?.message || 'Unknown error'}`);
     }
-    const data     = await res.json();
-    const resParts = data?.candidates?.[0]?.content?.parts || [];
-    const imgPart  = resParts.find(p => p.inlineData || p.inline_data);
+    const data      = await res.json();
+    const candidate = data?.candidates?.[0];
+    if (candidate?.finishReason === 'PROHIBITED_CONTENT') throw new Error('PROHIBITED_CONTENT');
+    const resParts  = candidate?.content?.parts || [];
+    const imgPart   = resParts.find(p => p.inlineData || p.inline_data);
     if (!imgPart) throw new Error('No image in response.');
     const inlineData = imgPart.inlineData || imgPart.inline_data;
     return compressToWebp(inlineData.data);
@@ -471,28 +478,31 @@ function sanitizeImagePrompt(prompt) {
 
 // Tries up to 3 times with progressively safer params.
 // onRetry(reason) is called before each fallback so the UI can show a status message.
-// Returns null if all attempts fail — story is still saved without a cover.
+// Throws immediately on PROHIBITED_CONTENT — caller must surface this to the user.
+// Returns null if all non-prohibited attempts fail — story is still saved without a cover.
 async function callImageApi(prompt, signal, onRetry) {
   if (signal?.aborted) return null;
 
+  const prohibited = (e) => { if (e.message === 'PROHIBITED_CONTENT') throw new Error('Gemini rejected this prompt — please try different wording.'); };
+
   // Attempt 1: original prompt + reference image (45 s)
-  try { return await callImageApiOnce(prompt, signal, true, 45000); } catch (e) { /**/ }
+  try { return await callImageApiOnce(prompt, signal, true, 45000); } catch (e) { prohibited(e); }
   if (signal?.aborted) return null;
 
   // Attempt 2: sanitized prompt + reference image (30 s)
   const safePrompt = sanitizeImagePrompt(prompt);
   onRetry?.('adjusting_prompt');
-  try { return await callImageApiOnce(safePrompt, signal, true, 30000); } catch (e) { /**/ }
+  try { return await callImageApiOnce(safePrompt, signal, true, 30000); } catch (e) { prohibited(e); }
   if (signal?.aborted) return null;
 
   // Attempt 3: sanitized prompt, no reference image (30 s)
   onRetry?.('no_reference');
-  try { return await callImageApiOnce(safePrompt, signal, false, 30000); } catch (e) { /**/ }
+  try { return await callImageApiOnce(safePrompt, signal, false, 30000); } catch (e) { prohibited(e); }
   return null;
 }
 
 async function imageCall(form, signal, onRetry) {
-  const toneWord = TONE_WORDS[form.tone - 1];
+  const toneWord = typeof form.tone === 'string' ? (form.tone.trim() || 'Gentle') : (TONE_WORDS[form.tone - 1] || 'Gentle');
   const prompt =
     `Create a soft, dreamy children's picture-book cover illustration. ` +
     `Scene: ${form.context}. Mood: ${toneWord}. ` +

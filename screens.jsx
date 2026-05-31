@@ -152,7 +152,9 @@ function Library({ t, items, onOpen, onDelete, onEditLink, onRate, childName }) 
     const matchQuery = !query ||
       s.title.toLowerCase().includes(query.toLowerCase()) ||
       (s.category && s.category.toLowerCase().includes(query.toLowerCase()));
-    const matchCat = category === 'All' || s.category === category;
+    const matchCat = category === 'All' ||
+      (category === 'Stories' && s.type === 'story') ||
+      (category === 'Linked'  && s.type === 'link');
     return matchQuery && matchCat;
   });
 
@@ -186,7 +188,7 @@ function Library({ t, items, onOpen, onDelete, onEditLink, onRate, childName }) 
       {search}
 
       <div style={{ display: 'flex', gap: 8, margin: '18px 0 16px', overflowX: 'auto', paddingBottom: 4 }}>
-        {['All', 'Bedtime', 'Animals', 'Magic', 'Adventure', 'Friends'].map((c) => {
+        {['All', 'Stories', 'Linked'].map((c) => {
           const active = category === c;
           return (
             <button key={c} onClick={() => setCategory(c)} style={{
@@ -244,12 +246,12 @@ function StoryCard({ t, item, onOpen, onDelete, onEditLink, onRate, coverH = 210
         {item.coverImage ? (
           <img src={item.coverImage} alt="" style={{ width: '100%', height: coverH, borderRadius: 20, objectFit: 'cover', display: 'block' }} />
         ) : (
-          <Cover story={item} mode={t.coverMode} w="100%" h={coverH} radius={20} badge={item.type === 'link'} />
+          <div style={{ width: '100%', height: coverH, borderRadius: 20, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 52 }}>📖</div>
         )}
         <StoryMeta t={t} story={item} onRate={onRate} />
       </button>
       <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
-        {item.type === 'link' && onEditLink && (
+        {onEditLink && (
           <button onClick={(e) => { e.stopPropagation(); onEditLink(item); }} style={{
             width: 30, height: 30, borderRadius: 999,
             background: 'rgba(15, 12, 40, 0.78)',
@@ -317,7 +319,7 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
           {hero.coverImage ? (
             <img src={hero.coverImage} alt="" style={{ width: '100%', height: 260, borderRadius: 2, objectFit: 'cover', display: 'block' }} />
           ) : (
-            <Cover story={hero} mode={t.coverMode} w="100%" h={260} radius={2} badge={hero.type === 'link'} />
+            <div style={{ width: '100%', height: 260, borderRadius: 2, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 64 }}>📖</div>
           )}
           <div style={{ marginTop: 14, paddingBottom: 10, borderBottom: `1px solid ${t.glassBorder}` }}>
             <div style={{ color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 6 }}>
@@ -339,7 +341,7 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
           </div>
         </button>
         <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4, zIndex: 5 }}>
-          {hero.type === 'link' && onEditLink && (
+          {onEditLink && (
             <button onClick={(e) => { e.stopPropagation(); onEditLink(hero); }} style={{
               width: 30, height: 30, borderRadius: 999,
               background: 'rgba(15,12,40,0.78)', backdropFilter: 'blur(8px)',
@@ -369,7 +371,6 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
 }
 
 // ─── Creator ──────────────────────────────────────────────────
-const CHARACTER_PRESETS = ['Rapunzel', 'a friendly dragon', 'a talking fox', 'a magical mermaid', 'a cloud fairy', 'a baby unicorn'];
 
 function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, length, setLength, tone, setTone, storyStyle, setStoryStyle, character, setCharacter, childName }) {
   const [vocabInput, setVocabInput] = useState('');
@@ -392,7 +393,7 @@ function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, 
     fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 1.5,
     textTransform: 'uppercase', color: t.textMuted, marginBottom: 10, display: 'block',
   };
-  const toneLabels = ['Calming', 'Cozy', 'Gentle', 'Playful', 'Adventurous'];
+  const TONE_PRESETS = ['Calming', 'Cozy', 'Gentle', 'Playful', 'Adventurous'];
 
   return (
     <div style={{ padding: '60px 20px 130px', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
@@ -432,7 +433,7 @@ function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, 
         {/* Context */}
         <div style={fieldBox}>
           <label style={labelStyle}>Today's context</label>
-          <textarea value={context} onChange={(e) => setContext(e.target.value)} rows={3} style={{
+          <textarea value={context} onChange={(e) => setContext(e.target.value)} rows={3} placeholder="What did you do today?" style={{
             width: '100%', border: 'none', outline: 'none', background: 'transparent', resize: 'none',
             color: t.text, fontFamily: t.fontBody, fontSize: 15, lineHeight: 1.45, fontWeight: 500,
           }} />
@@ -441,28 +442,13 @@ function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, 
         {/* Who does the child meet? */}
         <div style={fieldBox}>
           <label style={labelStyle}>Who does {childName} meet? <span style={{ fontWeight: 500, opacity: 0.45 }}>optional</span></label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-            {CHARACTER_PRESETS.map(c => {
-              const active = character === c;
-              return (
-                <button key={c} onClick={() => setCharacter(active ? '' : c)} style={{
-                  padding: '5px 11px', borderRadius: 999, cursor: 'pointer',
-                  background: active ? t.accentSoft : 'transparent',
-                  color: active ? t.accent : t.textMuted,
-                  border: active ? `1px solid ${t.accent}44` : `1px solid ${t.glassBorder}`,
-                  fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
-                }}>{c}</button>
-              );
-            })}
-          </div>
           <input
             value={character}
             onChange={(e) => setCharacter(e.target.value)}
-            placeholder="or type a character…"
+            placeholder="Enter character"
             style={{
               width: '100%', border: 'none', outline: 'none', background: 'transparent',
               color: t.text, fontFamily: t.fontBody, fontSize: 14, fontWeight: 500,
-              borderTop: `1px solid ${t.glassBorder}`, paddingTop: 10,
             }}
           />
         </div>
@@ -530,13 +516,33 @@ function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, 
           </div>
         </div>
 
-        {/* Tone slider */}
+        {/* Tone */}
         <div style={fieldBox}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <label style={{ ...labelStyle, marginBottom: 0 }}>Tone</label>
-            <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle, fontSize: 20, color: t.accent }}>{toneLabels[tone - 1]}</div>
+          <label style={labelStyle}>Tone</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+            {TONE_PRESETS.map(toneName => {
+              const active = tone === toneName;
+              return (
+                <button key={toneName} onClick={() => setTone(active ? '' : toneName)} style={{
+                  padding: '5px 11px', borderRadius: 999, cursor: 'pointer',
+                  background: active ? t.accentSoft : 'transparent',
+                  color: active ? t.accent : t.textMuted,
+                  border: active ? `1px solid ${t.accent}44` : `1px solid ${t.glassBorder}`,
+                  fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+                }}>{toneName}</button>
+              );
+            })}
           </div>
-          <Slider t={t} value={tone} min={1} max={5} onChange={setTone} />
+          <input
+            value={TONE_PRESETS.includes(tone) ? '' : (tone || '')}
+            onChange={(e) => setTone(e.target.value)}
+            placeholder="or type a tone…"
+            style={{
+              width: '100%', border: 'none', outline: 'none', background: 'transparent',
+              color: t.text, fontFamily: t.fontBody, fontSize: 14, fontWeight: 500,
+              borderTop: `1px solid ${t.glassBorder}`, paddingTop: 10,
+            }}
+          />
         </div>
 
         {/* Weave button */}
@@ -678,11 +684,7 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
   };
 
   const rows = [
-    { icon: 'wand',     title: 'Gemini AI',        detail: apiConfigured ? 'Configured' : 'Not set', onClick: onOpenKeyModal },
-    { icon: 'moon',     title: 'Reader theme',      detail: 'Warm dark' },
-    { icon: 'book',     title: 'Reading font size', detail: 'Large' },
-    { icon: 'sparkles', title: 'Magic level',       detail: 'Cozy' },
-    { icon: 'star',     title: 'Favorites',         detail: '8 stories' },
+    { icon: 'wand', title: 'Gemini AI', detail: apiConfigured ? 'Configured' : 'Not set', onClick: onOpenKeyModal },
   ];
 
   return (
@@ -1034,7 +1036,7 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
               }}
             />
           ) : (
-            <Cover story={story} mode={t.coverMode} w={200} h={260} radius={20} />
+            <div style={{ width: 200, height: 260, borderRadius: 20, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 72 }}>📖</div>
           )}
         </div>
 
@@ -1302,8 +1304,8 @@ function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
 
         {/* Phase progress */}
         <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
-          {phases.map((p, i) => {
-            const state = getState(i);
+          {phases.map((p) => {
+            const state = getState(p.key);
             return (
               <div key={p.key} style={{
                 display: 'flex', alignItems: 'center', gap: 10,
@@ -1722,32 +1724,21 @@ function ApiKeyModal({ t, open, onClose }) {
 }
 
 // ─── AddLinkModal ─────────────────────────────────────────────
-const SCENES_LIST = ['moon','fox','unicorn','whale','dragon','bear','cloud','turtle'];
-const PALETTE_PRESETS = [
-  ['#0f172a','#312e81','#fbbf24'],
-  ['#0c4a6e','#0ea5e9','#e0f2fe'],
-  ['#831843','#ec4899','#fce7f3'],
-  ['#064e3b','#10b981','#ecfdf5'],
-  ['#7c2d12','#ea580c','#fef3c7'],
-];
-
 function AddLinkModal({ t, open, onClose, onSave, item }) {
-  const [url,          setUrl]          = useState(item?.url          || '');
-  const [title,        setTitle]        = useState(item?.title        || '');
-  const [scene,        setScene]        = useState(item?.scene        || 'moon');
-  const [palette,      setPalette]      = useState(item?.palette      || PALETTE_PRESETS[0]);
-  const [coverImage,   setCoverImage]   = useState(item?.coverImage   || null);
+  const isLink = !item || item.type === 'link';
+
+  const [url,          setUrl]          = useState(item?.url         || '');
+  const [title,        setTitle]        = useState(item?.title       || '');
+  const [coverImage,   setCoverImage]   = useState(item?.coverImage  || null);
   const [coverPrompt,  setCoverPrompt]  = useState('');
   const [generating,   setGenerating]   = useState(false);
   const [coverError,   setCoverError]   = useState('');
   const abortRef = useRef(null);
 
   useEffect(() => {
-    setUrl        (item?.url         || '');
-    setTitle      (item?.title       || '');
-    setScene      (item?.scene       || 'moon');
-    setPalette    (item?.palette     || PALETTE_PRESETS[0]);
-    setCoverImage (item?.coverImage  || null);
+    setUrl        (item?.url        || '');
+    setTitle      (item?.title      || '');
+    setCoverImage (item?.coverImage || null);
     setCoverPrompt('');
     setCoverError ('');
   }, [item]);
@@ -1758,8 +1749,8 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
 
   if (!open) return null;
 
-  const canSave     = url.trim() && title.trim();
-  const hasApiKey   = window.SW?.hasApiKey();
+  const canSave   = isLink ? (url.trim() && title.trim()) : true;
+  const hasApiKey = window.SW?.hasApiKey();
 
   const handleGenerateCover = async () => {
     if (!coverPrompt.trim() || !hasApiKey) return;
@@ -1769,9 +1760,13 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
     abortRef.current = ctrl;
     try {
       const img = await window.SW.generateLinkCover(coverPrompt.trim(), ctrl.signal);
-      setCoverImage(img);
+      if (img) {
+        setCoverImage(img);
+      } else {
+        setCoverError('Cover generation failed — please try again.');
+      }
     } catch (e) {
-      if (e.name !== 'AbortError') setCoverError('Cover generation failed — please try again.');
+      if (e.name !== 'AbortError') setCoverError(e.message || 'Cover generation failed — please try again.');
     } finally {
       setGenerating(false);
       abortRef.current = null;
@@ -1800,7 +1795,7 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
           <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 22, color: t.text }}>
-            {item ? 'Edit Storybook' : 'Link a Storybook'}
+            {item?.type === 'story' ? 'Edit Cover' : item ? 'Edit Storybook' : 'Link a Storybook'}
           </div>
           <button onClick={onClose} style={{
             width: 40, height: 40, borderRadius: 999,
@@ -1810,55 +1805,27 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
           }}><Icon name="close" size={18} stroke={2.5} /></button>
         </div>
 
-        {/* URL */}
-        <div style={fieldBox}>
-          <label style={labelStyle}>Gemini URL</label>
-          <input type="url" value={url} onChange={(e) => setUrl(e.target.value)}
-            placeholder="g.co/gemini/share/…"
-            style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent',
-              color: t.text, fontFamily: t.fontBody, fontSize: 15, fontWeight: 500 }} />
-        </div>
-
-        {/* Title */}
-        <div style={fieldBox}>
-          <label style={labelStyle}>Title</label>
-          <input value={title} onChange={(e) => setTitle(e.target.value)}
-            placeholder="Story title…"
-            style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent',
-              color: t.text, fontFamily: t.fontBody, fontSize: 15, fontWeight: 500 }} />
-        </div>
-
-        {/* Scene chips */}
-        <div style={{ ...fieldBox, padding: '14px 16px' }}>
-          <label style={labelStyle}>Scene <span style={{ fontWeight: 500, opacity: 0.45 }}>fallback if no cover image</span></label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {SCENES_LIST.map(s => (
-              <button key={s} onClick={() => setScene(s)} style={{
-                padding: '6px 14px', borderRadius: 999, cursor: 'pointer',
-                background: scene === s ? t.accent : t.glass,
-                color: scene === s ? '#1a0a3e' : t.textMuted,
-                border: scene === s ? 'none' : `1px solid ${t.glassBorder}`,
-                fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
-                textTransform: 'capitalize',
-              }}>{s}</button>
-            ))}
+        {/* URL — link items only */}
+        {isLink && (
+          <div style={fieldBox}>
+            <label style={labelStyle}>Gemini URL</label>
+            <input type="url" value={url} onChange={(e) => setUrl(e.target.value)}
+              placeholder="g.co/gemini/share/…"
+              style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent',
+                color: t.text, fontFamily: t.fontBody, fontSize: 15, fontWeight: 500 }} />
           </div>
-        </div>
+        )}
 
-        {/* Palette swatches */}
-        <div style={{ ...fieldBox, padding: '14px 16px' }}>
-          <label style={labelStyle}>Palette <span style={{ fontWeight: 500, opacity: 0.45 }}>fallback if no cover image</span></label>
-          <div style={{ display: 'flex', gap: 10 }}>
-            {PALETTE_PRESETS.map((p, i) => (
-              <button key={i} onClick={() => setPalette(p)} style={{
-                width: 36, height: 36, borderRadius: 12, border: 'none', cursor: 'pointer',
-                background: `linear-gradient(135deg, ${p[0]} 0%, ${p[1]} 60%, ${p[2]} 100%)`,
-                outline: JSON.stringify(palette) === JSON.stringify(p) ? `3px solid ${t.accent}` : 'none',
-                outlineOffset: 2,
-              }} />
-            ))}
+        {/* Title — link items only */}
+        {isLink && (
+          <div style={fieldBox}>
+            <label style={labelStyle}>Title</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)}
+              placeholder="Story title…"
+              style={{ width: '100%', border: 'none', outline: 'none', background: 'transparent',
+                color: t.text, fontFamily: t.fontBody, fontSize: 15, fontWeight: 500 }} />
           </div>
-        </div>
+        )}
 
         {/* AI cover image generation */}
         <div style={fieldBox}>
@@ -1939,16 +1906,19 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
               </button>
             </div>
           ) : (
-            <Cover
-              story={{ scene, palette, type: 'link', title: title || 'Preview' }}
-              mode="glow" w={110} h={148} radius={16} badge={true}
-            />
+            <div style={{ width: 110, height: 148, borderRadius: 16, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 40 }}>📖</div>
           )}
         </div>
 
         {/* Save button */}
         <button
-          onClick={() => canSave && onSave({ url: url.trim(), title: title.trim(), scene, palette, coverImage }, item?.id || null)}
+          onClick={() => {
+            if (!canSave) return;
+            const saveData = isLink
+              ? { url: url.trim(), title: title.trim(), coverImage }
+              : { coverImage };
+            onSave(saveData, item?.id || null);
+          }}
           disabled={!canSave}
           style={{
             width: '100%', border: 'none', cursor: canSave ? 'pointer' : 'default',
@@ -1959,7 +1929,7 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
             color: canSave ? '#1a0a3e' : t.textMuted,
             fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 18,
           }}>
-          {item ? 'Save Changes' : 'Add to Library'}
+          {item?.type === 'story' ? 'Save Cover' : item ? 'Save Changes' : 'Add to Library'}
         </button>
       </div>
     </div>
