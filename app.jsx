@@ -148,6 +148,18 @@ function StoryWeaverApp() {
       if (ignoreWeaveRef.current) return;
       await window.SW.itemPut(story);
       setItems(prev => [story, ...prev]);
+
+      // Non-blocking Drive backup — runs after navigation
+      if (window.SW.drive.isConnected() && story.coverImage) {
+        window.SW.drive.uploadCover(story.id, story.coverImage)
+          .then(coverDriveId => {
+            const upd = Object.assign({}, story, { coverDriveId });
+            window.SW.itemPut(upd);
+            setItems(prev => prev.map(i => i.id === story.id ? upd : i));
+          })
+          .catch(() => {});
+      }
+
       navigate('/story/' + story.id);
     } catch (err) {
       if (ignoreWeaveRef.current) return;
@@ -186,6 +198,16 @@ function StoryWeaverApp() {
       const updated  = { ...existing, ...data };
       await window.SW.itemPut(updated);
       setItems(prev => prev.map(i => i.id === editingId ? updated : i));
+      // Upload new cover to Drive if it changed
+      if (window.SW.drive.isConnected() && data.coverImage && data.coverImage !== existing?.coverImage) {
+        window.SW.drive.uploadCover(updated.id, data.coverImage)
+          .then(coverDriveId => {
+            const upd = Object.assign({}, updated, { coverDriveId });
+            window.SW.itemPut(upd);
+            setItems(prev => prev.map(i => i.id === editingId ? upd : i));
+          })
+          .catch(() => {});
+      }
     } else {
       const newLink = {
         id: window.SW.uniqueId(window.SW.slugify(data.title), items.map(i => i.id)),
@@ -196,6 +218,16 @@ function StoryWeaverApp() {
       };
       await window.SW.itemPut(newLink);
       setItems(prev => [newLink, ...prev]);
+      // Upload cover to Drive if present
+      if (window.SW.drive.isConnected() && newLink.coverImage) {
+        window.SW.drive.uploadCover(newLink.id, newLink.coverImage)
+          .then(coverDriveId => {
+            const upd = Object.assign({}, newLink, { coverDriveId });
+            window.SW.itemPut(upd);
+            setItems(prev => prev.map(i => i.id === newLink.id ? upd : i));
+          })
+          .catch(() => {});
+      }
     }
     setAddLinkOpen(false);
     setEditingLink(null);
@@ -238,6 +270,17 @@ function StoryWeaverApp() {
     setAddLinkOpen(true);
   };
 
+  const onDriveMigrate = async (onProgress) => {
+    const updated = await window.SW.drive.migrateCovers(items, onProgress);
+    if (updated.length > 0) {
+      setItems(prev => {
+        const byId = {};
+        updated.forEach(u => { byId[u.id] = u; });
+        return prev.map(i => byId[i.id] || i);
+      });
+    }
+  };
+
   return (
     <div style={{
       width: '100%', height: '100%', position: 'relative', overflow: 'hidden',
@@ -260,7 +303,7 @@ function StoryWeaverApp() {
             childName={childName} />
         )}
         {tab === 'settings' && (
-          <Settings t={theme} onOpenKeyModal={() => setKeyModalOpen(true)} onNameChange={onNameChange} />
+          <Settings t={theme} onOpenKeyModal={() => setKeyModalOpen(true)} onNameChange={onNameChange} items={items} onDriveMigrate={onDriveMigrate} />
         )}
       </div>
 

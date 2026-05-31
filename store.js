@@ -528,6 +528,190 @@ async function weaveStory(form, existingIds, signal, onProgress) {
   return { ...story, type: 'story', coverImage: image, createdAt: Date.now() };
 }
 
+// ─── Google Drive integration ─────────────────────────────────
+const DRIVE_CLIENT_ID   = '618607613623-aapp6ormsifld1c2oboi0gl2fb700b2p.apps.googleusercontent.com';
+const DRIVE_SCOPE       = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_ROOT_FOLDER = 'StoryWeaver';
+const DRIVE_SUB_COVERS  = 'covers';
+const DRIVE_SUB_AUDIO   = 'audio';
+
+let _driveTokClient = null;
+let _driveToken     = null;
+let _driveExpiry    = 0;
+
+function _driveInitClient() {
+  if (_driveTokClient) return _driveTokClient;
+  if (!window.google?.accounts?.oauth2)
+    throw new Error('Google Sign-In library not loaded yet — try again in a moment.');
+  _driveTokClient = google.accounts.oauth2.initTokenClient({
+    client_id: DRIVE_CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: () => {},
+  });
+  return _driveTokClient;
+}
+
+function _driveGetToken(forcePrompt) {
+  if (!forcePrompt && _driveToken && Date.now() < _driveExpiry - 60000)
+    return Promise.resolve(_driveToken);
+  const client = _driveInitClient();
+  return new Promise((resolve, reject) => {
+    const tid = setTimeout(() => reject(new Error('Google auth timed out.')), 90000);
+    client.callback = (r) => {
+      clearTimeout(tid);
+      if (r.error) return reject(new Error(r.error_description || r.error));
+      _driveToken  = r.access_token;
+      _driveExpiry = Date.now() + (r.expires_in || 3600) * 1000;
+      resolve(_driveToken);
+    };
+    client.requestAccessToken(forcePrompt ? { prompt: 'select_account' } : {});
+  });
+}
+
+async function _driveJsonFetch(path, opts) {
+  const token = await _driveGetToken(false);
+  const url   = path.startsWith('https://') ? path : 'https://www.googleapis.com/drive/v3' + path;
+  const res   = await fetch(url, {
+    ...opts,
+    headers: { 'Authorization': 'Bearer ' + token, ...(opts && opts.headers || {}) },
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error && e.error.message || ('Drive API error ' + res.status));
+  }
+  return res.json();
+}
+
+async function _driveFindFolder(name, parentId) {
+  const q = `name='${name}' and mimeType='application/vnd.google-apps.folder' and '${parentId || 'root'}' in parents and trashed=false`;
+  const d = await _driveJsonFetch('/files?q=' + encodeURIComponent(q) + '&fields=files(id)');
+  return (d.files && d.files[0] && d.files[0].id) || null;
+}
+
+async function _driveCreateFolder(name, parentId) {
+  const body = { name, mimeType: 'application/vnd.google-apps.folder' };
+  if (parentId) body.parents = [parentId];
+  const d = await _driveJsonFetch('/files', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return d.id;
+}
+
+async function _driveEnsureFolders() {
+  if (localStorage.getItem('sw_drive_covers_id') && localStorage.getItem('sw_drive_audio_id')) return;
+
+  let rootId = localStorage.getItem('sw_drive_root_id');
+  if (!rootId) {
+    rootId = (await _driveFindFolder(DRIVE_ROOT_FOLDER, null)) || (await _driveCreateFolder(DRIVE_ROOT_FOLDER, null));
+    localStorage.setItem('sw_drive_root_id', rootId);
+  }
+  if (!localStorage.getItem('sw_drive_covers_id')) {
+    const id = (await _driveFindFolder(DRIVE_SUB_COVERS, rootId)) || (await _driveCreateFolder(DRIVE_SUB_COVERS, rootId));
+    localStorage.setItem('sw_drive_covers_id', id);
+  }
+  if (!localStorage.getItem('sw_drive_audio_id')) {
+    const id = (await _driveFindFolder(DRIVE_SUB_AUDIO, rootId)) || (await _driveCreateFolder(DRIVE_SUB_AUDIO, rootId));
+    localStorage.setItem('sw_drive_audio_id', id);
+  }
+}
+
+function _dataUrlToBlob(dataUrl) {
+  const comma = dataUrl.indexOf(',');
+  const mime  = dataUrl.slice(5, dataUrl.indexOf(';'));
+  const bytes = Uint8Array.from(atob(dataUrl.slice(comma + 1)), c => c.charCodeAt(0));
+  return new Blob([bytes], { type: mime });
+}
+
+async function _driveMultipartUpload(filename, blob, folderId) {
+  const BOUND = 'sw' + Date.now();
+  const enc   = new TextEncoder();
+  const meta  = JSON.stringify({ name: filename, parents: [folderId] });
+  const parts = [
+    enc.encode('--' + BOUND + '\r\nContent-Type: application/json\r\n\r\n' + meta + '\r\n'),
+    enc.encode('--' + BOUND + '\r\nContent-Type: ' + blob.type + '\r\n\r\n'),
+    new Uint8Array(await blob.arrayBuffer()),
+    enc.encode('\r\n--' + BOUND + '--'),
+  ];
+  const body = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let off = 0;
+  for (const p of parts) { body.set(p, off); off += p.length; }
+
+  const token = await _driveGetToken(false);
+  const res   = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'multipart/related; boundary=' + BOUND },
+    body,
+  });
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}));
+    throw new Error(e.error && e.error.message || ('Drive upload error ' + res.status));
+  }
+  return (await res.json()).id;
+}
+
+function driveIsConnected() { return !!localStorage.getItem('sw_drive_email'); }
+function driveGetEmail()    { return localStorage.getItem('sw_drive_email') || ''; }
+
+async function driveConnect() {
+  await _driveGetToken(true);
+  const d = await _driveJsonFetch('/about?fields=user');
+  const email = (d.user && d.user.emailAddress) || 'Connected';
+  localStorage.setItem('sw_drive_email', email);
+  await _driveEnsureFolders();
+  return email;
+}
+
+function driveDisconnect() {
+  if (_driveToken) google.accounts.oauth2.revoke(_driveToken, () => {});
+  _driveToken = null; _driveExpiry = 0;
+  ['sw_drive_email', 'sw_drive_root_id', 'sw_drive_covers_id', 'sw_drive_audio_id']
+    .forEach(k => localStorage.removeItem(k));
+}
+
+async function driveUploadCover(storyId, dataUrl) {
+  await _driveEnsureFolders();
+  const folderId = localStorage.getItem('sw_drive_covers_id');
+  return _driveMultipartUpload(storyId + '-cover.webp', _dataUrlToBlob(dataUrl), folderId);
+}
+
+async function driveFetchCover(fileId) {
+  const token = await _driveGetToken(false);
+  const res   = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {
+    headers: { 'Authorization': 'Bearer ' + token },
+  });
+  if (!res.ok) throw new Error('Drive fetch error ' + res.status);
+  const blob = await res.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function driveMigrateCovers(items, onProgress) {
+  const queue   = items.filter(i => i.coverImage && !i.coverDriveId);
+  const updated = [];
+  for (let idx = 0; idx < queue.length; idx++) {
+    const item = queue[idx];
+    onProgress && onProgress({ total: queue.length, done: idx, title: item.title });
+    try {
+      const fileId = await driveUploadCover(item.id, item.coverImage);
+      const next   = Object.assign({}, item, { coverDriveId: fileId });
+      await itemPut(next);
+      updated.push(next);
+    } catch (_) { /* skip failed item, continue */ }
+  }
+  onProgress && onProgress({ total: queue.length, done: queue.length, title: null });
+  return updated;
+}
+
+async function driveGetStorageInfo() {
+  const d = await _driveJsonFetch('/about?fields=storageQuota');
+  return d.storageQuota;
+}
+
 // ─── Export ───────────────────────────────────────────────────
 window.SW = {
   dbOpen, itemsAll, itemPut, itemDelete,
@@ -542,4 +726,14 @@ window.SW = {
   weaveStory, generateLinkCover,
   getGithubToken, setGithubToken, getGistId, setGistId,
   pushToGist, pullFromGist,
+  drive: {
+    isConnected:   driveIsConnected,
+    getEmail:      driveGetEmail,
+    connect:       driveConnect,
+    disconnect:    driveDisconnect,
+    uploadCover:   driveUploadCover,
+    fetchCover:    driveFetchCover,
+    migrateCovers: driveMigrateCovers,
+    getStorageInfo: driveGetStorageInfo,
+  },
 };

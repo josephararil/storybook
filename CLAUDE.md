@@ -48,7 +48,7 @@ data.js → sophie.js → store.js → cover.jsx → screens.jsx → app.jsx
 | `index.html` | Entry point; CDN imports; script load order |
 | `data.js` | 8 seed stories in `window.SW_STORIES` / `window.SW_SEEDS` |
 | `sophie.js` | Hardcoded Sophie reference photo as `window.SOPHIE_IMAGE` (base64 JPEG, ~92 KB); plain `<script>`, not Babel |
-| `store.js` | All persistence and API logic; exports `window.SW`; IndexedDB wrapper, Gemini API calls, seed deletion, child profile, image compression |
+| `store.js` | All persistence and API logic; exports `window.SW`; IndexedDB wrapper, Gemini API calls, seed deletion, child profile, image compression, Google Drive integration |
 | `cover.jsx` | Procedural SVG story cover art; 8 scene types; 3 render modes |
 | `screens.jsx` | All app screens: Library, Creator, Settings, Reader, Weaving, ApiKeyModal, AddLinkModal; inline `Icon` component |
 | `app.jsx` | Root `StoryWeaverApp`; theme object; hash routing; lifted state; all event handlers |
@@ -89,9 +89,10 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 ```js
 {
   ...above,
-  type:        'story',
-  coverImage:  'data:image/webp;base64,...',  // AI-generated cover, or null
-  createdAt:   1234567890,                    // Date.now() timestamp
+  type:         'story',
+  coverImage:   'data:image/webp;base64,...',  // AI-generated cover, or null
+  coverDriveId: 'abc123XYZ',                   // Google Drive file ID (optional; set when Drive is connected)
+  createdAt:    1234567890,                    // Date.now() timestamp
 }
 ```
 
@@ -100,11 +101,12 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 ```js
 {
   id, title, scene, palette,
-  type:       'link',
-  url:        'https://...',
-  rating:     0,
-  createdAt:  1234567890,
-  coverImage: 'data:image/webp;base64,...',  // AI-generated cover (optional), or null/absent
+  type:         'link',
+  url:          'https://...',
+  rating:       0,
+  createdAt:    1234567890,
+  coverImage:   'data:image/webp;base64,...',  // AI-generated cover (optional), or null/absent
+  coverDriveId: 'abc123XYZ',                   // Google Drive file ID (optional)
 }
 ```
 
@@ -138,6 +140,25 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 | `getGistId() / setGistId(id)` | Gist ID for cloud sync via localStorage (`sw_gist_id`) |
 | `pushToGist()` | Serialize localStorage (excluding API keys) + all IndexedDB items → create/update private Gist; auto-saves returned Gist ID |
 | `pullFromGist()` | Fetch Gist, restore localStorage keys and upsert IndexedDB items, then reload page |
+| `drive.isConnected()` | Returns true if a Drive account email is stored in localStorage |
+| `drive.getEmail()` | Returns the connected Google account email (or `''`) |
+| `drive.connect()` | Triggers OAuth2 popup (account picker), fetches user email, creates `StoryWeaver/covers/` and `StoryWeaver/audio/` folders, stores folder IDs in localStorage |
+| `drive.disconnect()` | Revokes the access token and clears all `sw_drive_*` localStorage keys |
+| `drive.uploadCover(storyId, dataUrl)` | Uploads a cover data URL to Drive as `{storyId}-cover.webp` in the covers folder; returns the Drive file ID |
+| `drive.fetchCover(fileId)` | Downloads a file from Drive by ID and returns it as a data URL |
+| `drive.migrateCovers(items, onProgress)` | Uploads all items that have `coverImage` but no `coverDriveId`; updates each item in IndexedDB; calls `onProgress({total,done,title})` per item |
+| `drive.getStorageInfo()` | Returns Drive quota object `{limit, usage, usageInDrive}` |
+
+### Google Drive localStorage keys
+
+| Key | Contents |
+|---|---|
+| `sw_drive_email` | Connected Google account email; presence indicates connected state |
+| `sw_drive_root_id` | Drive folder ID for `StoryWeaver/` |
+| `sw_drive_covers_id` | Drive folder ID for `StoryWeaver/covers/` |
+| `sw_drive_audio_id` | Drive folder ID for `StoryWeaver/audio/` (reserved for future TTS files) |
+
+All Drive keys are included in Gist sync (not sensitive — no tokens stored). The OAuth2 access token lives in memory only and expires after 1 hour; re-auth triggers a brief Google popup.
 
 ### Seed Deletion Architecture
 

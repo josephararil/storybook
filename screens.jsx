@@ -571,7 +571,7 @@ function Slider({ t, value, min, max, onChange }) {
 }
 
 // ─── Settings ─────────────────────────────────────────────────
-function Settings({ t, onOpenKeyModal, onNameChange }) {
+function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
   const [childName,    setChildNameLocal] = useState(() => window.SW?.getChildName() || 'Sophie');
   const [birthday,     setBirthdayLocal]  = useState(() => window.SW?.getChildBirthday() || '');
   const [sampleSet,    setSampleSet]      = useState(() => !!window.SW?.getSampleImage());
@@ -582,6 +582,49 @@ function Settings({ t, onOpenKeyModal, onNameChange }) {
   const [syncing,      setSyncing]        = useState(null); // null | 'push' | 'pull'
   const photoInputRef = useRef(null);
   const apiConfigured = window.SW?.hasApiKey();
+
+  const [driveConnected,  setDriveConnected]  = useState(() => window.SW?.drive?.isConnected() || false);
+  const [driveEmail,      setDriveEmail]      = useState(() => window.SW?.drive?.getEmail() || '');
+  const [driveConnecting, setDriveConnecting] = useState(false);
+  const [driveError,      setDriveError]      = useState(null);
+  const [migrating,       setMigrating]       = useState(false);
+  const [migrateProgress, setMigrateProgress] = useState(null);
+
+  const migrateCount = (items || []).filter(i => i.coverImage && !i.coverDriveId).length;
+
+  const handleDriveConnect = async () => {
+    setDriveConnecting(true);
+    setDriveError(null);
+    try {
+      const email = await window.SW.drive.connect();
+      setDriveEmail(email);
+      setDriveConnected(true);
+    } catch (e) {
+      setDriveError(e.message || 'Failed to connect to Google Drive.');
+    } finally {
+      setDriveConnecting(false);
+    }
+  };
+
+  const handleDriveDisconnect = () => {
+    window.SW?.drive?.disconnect();
+    setDriveConnected(false);
+    setDriveEmail('');
+    setMigrateProgress(null);
+    setDriveError(null);
+  };
+
+  const handleMigrate = async () => {
+    setMigrating(true);
+    setMigrateProgress({ total: migrateCount, done: 0 });
+    try {
+      await onDriveMigrate?.((p) => setMigrateProgress(p));
+    } catch (e) {
+      setDriveError(e.message);
+    } finally {
+      setMigrating(false);
+    }
+  };
 
   const handlePush = async () => {
     setSyncing('push');
@@ -731,6 +774,79 @@ function Settings({ t, onOpenKeyModal, onNameChange }) {
             color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
             padding: '6px 12px', borderRadius: 10, flexShrink: 0,
           }}>Upload</button>
+        )}
+      </div>
+
+      {/* Google Drive */}
+      <div style={{
+        background: t.glass, border: `1px solid ${t.glassBorder}`,
+        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        borderRadius: 22, padding: 20, marginBottom: 18,
+      }}>
+        <div style={{ fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 1.5, textTransform: 'uppercase', color: t.textMuted, marginBottom: 14 }}>Google Drive</div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+            background: driveConnected ? 'rgba(74,222,128,0.15)' : t.accentSoft,
+            color: driveConnected ? '#4ade80' : t.accent,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Icon name="cloud-up" size={18} stroke={2} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: t.fontBody, fontWeight: 600, fontSize: 14, color: t.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {driveConnected ? driveEmail : 'Not connected'}
+            </div>
+            {driveConnected && (
+              <div style={{ fontFamily: t.fontBody, fontSize: 12, color: '#4ade80', fontWeight: 600, marginTop: 2 }}>Connected</div>
+            )}
+          </div>
+          {!driveConnected ? (
+            <button onClick={handleDriveConnect} disabled={driveConnecting} style={{
+              background: t.accentSoft, border: `1px solid ${t.accent}44`,
+              cursor: driveConnecting ? 'default' : 'pointer',
+              color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
+              padding: '6px 14px', borderRadius: 10, flexShrink: 0,
+              opacity: driveConnecting ? 0.6 : 1,
+            }}>{driveConnecting ? 'Connecting…' : 'Connect'}</button>
+          ) : (
+            <button onClick={handleDriveDisconnect} style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: '#f87171', fontFamily: t.fontBody, fontWeight: 600, fontSize: 13,
+              padding: '4px 8px', borderRadius: 8, flexShrink: 0,
+            }}>Disconnect</button>
+          )}
+        </div>
+
+        {driveConnected && migrateCount > 0 && (
+          <button onClick={handleMigrate} disabled={migrating} style={{
+            marginTop: 14, width: '100%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            padding: '11px 0', borderRadius: 12,
+            background: t.accentSoft, border: `1px solid ${t.accent}55`,
+            color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
+            cursor: migrating ? 'default' : 'pointer', opacity: migrating ? 0.7 : 1,
+          }}>
+            <Icon name="cloud-up" size={15} stroke={2} />
+            {migrating && migrateProgress
+              ? `Backing up ${migrateProgress.done + 1} of ${migrateProgress.total}…`
+              : `Back up ${migrateCount} cover${migrateCount !== 1 ? 's' : ''} to Drive`}
+          </button>
+        )}
+
+        {driveConnected && migrateCount === 0 && (items || []).some(i => i.coverDriveId) && (
+          <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 6, color: '#4ade80', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600 }}>
+            <Icon name="check" size={14} stroke={2.5} /> All covers backed up to Drive
+          </div>
+        )}
+
+        {driveError && (
+          <div style={{
+            marginTop: 10, padding: '9px 12px', borderRadius: 10,
+            background: 'rgba(248,113,113,0.12)', border: '1px solid rgba(248,113,113,0.3)',
+            color: '#f87171', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600,
+          }}>{driveError}</div>
         )}
       </div>
 
