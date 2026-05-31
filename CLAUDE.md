@@ -10,9 +10,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Git & Deployment
 
-Git is fully configured. Push directly to `main` and merge without asking for confirmation — no PR required.
+Git is fully configured. Always make a new branch if you are in `main` before starting new work. Once finished, merge all your code to that branch, and raise a PR to merge to `main` without needing approval.
 
-The site is deployed via GitHub Pages from the `main` branch root. Pushing to `main` triggers a redeploy automatically (allow ~60 seconds).
+The site is deployed via GitHub Pages from the `main` branch root. Once user accepts the PR to merge to `main`, this triggers a redeploy automatically after 60 seconds.
 
 ## Running the App
 
@@ -148,10 +148,6 @@ Audio data (WAV, ~7–12 MB per story) is stored in a **separate IndexedDB objec
 | `weaveStory(form, existingIds, signal, onProgress)` | Parallel AI story generation: text + image run simultaneously; audio starts as soon as text finishes. Returns `{ ...story, audioPromise, audioReady: false }` — caller awaits `audioPromise` in the background after navigating to the story. |
 | `generateAudio(story, signal)` | Calls Gemini TTS (`gemini-3.1-flash-tts-preview`, voice Aoede) to narrate a story; returns a WAV data URL or null |
 | `generateLinkCover(description, signal)` | Generate a cover image for a linked storybook; `description` is a free-text prompt about the book; returns a WebP data URL or throws |
-| `getGithubToken() / setGithubToken(k)` | GitHub PAT for Gist sync via localStorage (`sw_github_token`) — excluded from sync |
-| `getGistId() / setGistId(id)` | Gist ID for cloud sync via localStorage (`sw_gist_id`) |
-| `pushToGist()` | Serialize localStorage (excluding API keys) + all IndexedDB items → create/update private Gist; auto-saves returned Gist ID |
-| `pullFromGist()` | Fetch Gist, restore localStorage keys and upsert IndexedDB items, then reload page |
 | `drive.isConnected()` | Returns true if a Drive account email is stored in localStorage |
 | `drive.getEmail()` | Returns the connected Google account email (or `''`) |
 | `drive.connect()` | Triggers OAuth2 popup (account picker), fetches user email, creates `StoryWeaver/covers/` and `StoryWeaver/audio/` folders, stores folder IDs in localStorage |
@@ -162,6 +158,8 @@ Audio data (WAV, ~7–12 MB per story) is stored in a **separate IndexedDB objec
 | `drive.fetchAudio(fileId)` | Downloads an audio file from Drive by ID and returns it as a data URL |
 | `drive.migrateCovers(items, onProgress)` | Uploads all items that have `coverImage` but no `coverDriveId`; updates each item in IndexedDB; calls `onProgress({total,done,title})` per item |
 | `drive.getStorageInfo()` | Returns Drive quota object `{limit, usage, usageInDrive}` |
+| `drive.pushSync()` | Serializes all localStorage (excluding `sw_gemini_key`) + all IndexedDB items → creates/overwrites `storyweaver-sync.json` in the `StoryWeaver/` Drive folder |
+| `drive.pullSync()` | Downloads `storyweaver-sync.json` from Drive, restores localStorage keys and upserts IndexedDB items, then reloads the page |
 
 ### Google Drive localStorage keys
 
@@ -171,10 +169,8 @@ Audio data (WAV, ~7–12 MB per story) is stored in a **separate IndexedDB objec
 | `sw_drive_root_id` | Drive folder ID for `StoryWeaver/` |
 | `sw_drive_covers_id` | Drive folder ID for `StoryWeaver/covers/` |
 | `sw_drive_audio_id` | Drive folder ID for `StoryWeaver/audio/` |
-| `sw_audio_voice` | TTS voice name (default `'Aoede'`) |
-| `sw_audio_sys_prompt` | TTS narration instructions override; absent = use built-in |
 
-All Drive keys are included in Gist sync (not sensitive — no tokens stored). The OAuth2 access token lives in memory only and expires after 1 hour; re-auth triggers a brief Google popup.
+All Drive keys are included in Drive sync (not sensitive — no tokens stored). The OAuth2 access token lives in memory only and expires after 1 hour; re-auth triggers a brief Google popup.
 
 ### Seed Deletion Architecture
 
