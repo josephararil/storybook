@@ -356,12 +356,29 @@ Every card shows a pencil button (not just link items). Clicking it opens `AddLi
 
 ## Reader Screen
 
-The Reader renders the story overlay at `z-index: 100`. Key features:
+`Reader` in `screens.jsx` is a router — it dispatches to one of two implementations based on story shape:
 
-- If `story.coverImage` exists (AI-generated): renders as a tappable `<img>` with `cursor: zoom-in`; clicking opens a fullscreen **lightbox** (`z-index: 300`, blurred backdrop) showing the image at up to `92vw / 88vh`. Tap backdrop or × to close.
-- If no `coverImage` (seed stories or stories without a generated cover): renders a 📖 emoji placeholder — there is no SVG Cover fallback.
-- Star rating (1–5), persisted immediately via `onRate`.
-- "Delete story" button always shown (seeds and user stories alike).
+```js
+const isPaged = story.version === 2 && Array.isArray(story.pages);
+return isPaged ? <PagedReader .../> : <LegacyReader .../>;
+```
+
+### LegacyReader (seed stories + any non-v2 story)
+
+Renders at `z-index: 100`. Scrollable layout: hero cover image or 📖 placeholder, title, body paragraphs (`story.body[]`), rating panel, delete button. Floating audio button at bottom when `story.audioReady` is true. Lightbox on cover-image tap.
+
+### PagedReader (v2 AI stories — `story.version === 2 && story.pages[]`)
+
+Renders at `z-index: 100`. Full-bleed layout split into two sections:
+
+- **Image section** (top 68vh): current page image fills full width/height (`objectFit: cover`). 📖 placeholder if no image. Gradient overlay at bottom. Title + category shown only on page 0 (absolute-positioned). Page counter (top-left). Close button × (top-right, z-index 5). Eye icon to open lightbox (top-right below close, z-index 5). Three invisible tap-zone buttons at z-index 2 (left third = prev, centre third = toggle pause/play, right third = next).
+- **Text panel** (remaining viewport): translucent dark background. Pause/Play pill button (top-right, only when current page has audio). Page text rendered via `renderLine()` with `{vocab}` highlighting. "Tap → to continue" hint appears after 6 s when a page has no audio. Rating panel + delete button shown only on the last page.
+
+**State:** `currentPage`, `playing`, `audioByPage` (plain object `{[idx]: dataUrl|null}`), `audiosLoaded` (bool), `imageZoom`, `rating`, `tapHint`.
+
+**Audio:** All per-page audios are loaded on mount via `audioGetPage(storyId, idx)` in a sequential async loop. When `currentPage` changes (or audios finish loading), the effect sets `audioRef.current.src` and calls `play()` if audio exists for that page. On `ended`, `goNext()` is called — auto-advancing to the next page. If no audio for a page, a 6 s timer fires `setTapHint(true)`.
+
+**Z-index ladder:** Reader 100 → tap zones 2 → close/eye buttons 5 → lightbox 300.
 
 ## Cover Component
 
