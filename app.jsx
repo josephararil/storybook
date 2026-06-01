@@ -143,29 +143,33 @@ function StoryWeaverApp() {
         form, items.map(i => i.id), controller.signal,
         (phase, data) => {
           if (ignoreWeaveRef.current) return;
+          if (phase === 'pageAsset') return; // M4 will render per-page progress
           if (phase === 'imageRetry') {
             const msgs = { adjusting_prompt: 'Adjusting prompt…', no_reference: 'Trying without reference photo…' };
-            setWeavingSubMsg(msgs[data] || 'Retrying…');
+            setWeavingSubMsg(msgs[data?.reason] || 'Retrying…');
+            return;
+          }
+          if (phase === 'assets') {
+            // text done, images + audio fanning out — map to existing 'imagePending' UI state
+            setWeavePhase('imagePending');
+            setWeavingSubMsg(null);
+            if (data?.story) setWeavingStory(data.story);
             return;
           }
           setWeavePhase(phase);
           setWeavingSubMsg(null);
-          // imagePending = text done, image still running — store partial story for skip
-          if (phase === 'imagePending' && data) setWeavingStory(data);
         }
       );
       if (ignoreWeaveRef.current) return;
 
-      // audioPromise resolves in background — extract it before saving
-      const { audioPromise, ...story } = result;
+      const { story, assetsPromise } = result;
       await window.SW.itemPut(story);
       setItems(prev => [story, ...prev]);
 
-      // Navigate to story immediately — image is ready, audio continues in background
       navigate('/story/' + story.id);
       abortRef.current = null;
 
-      // Non-blocking cover backup to Drive
+      // Non-blocking cover backup to Drive (page-1 image used as cover)
       if (window.SW.drive.isConnected() && story.coverImage) {
         window.SW.drive.uploadCover(story.id, story.coverImage)
           .then(coverDriveId => {
@@ -180,28 +184,17 @@ function StoryWeaverApp() {
           .catch(() => {});
       }
 
-      // Wait for audio in background — update story once ready
-      if (audioPromise) {
-        audioPromise.then(async (audioData) => {
-          if (!audioData) return;
-          await window.SW.audioPut(story.id, audioData);
+      // Write per-page audio as it settles, then flip audioReady
+      if (assetsPromise) {
+        assetsPromise.then(async (audioResults) => {
+          for (let idx = 0; idx < audioResults.length; idx++) {
+            if (audioResults[idx]) {
+              await window.SW.audioPutPage(story.id, idx, audioResults[idx]);
+            }
+          }
           const withAudio = Object.assign({}, story, { audioReady: true });
           await window.SW.itemPut(withAudio);
           setItems(prev => prev.map(i => i.id === story.id ? withAudio : i));
-
-          if (window.SW.drive.isConnected()) {
-            window.SW.drive.uploadAudio(story.id, audioData)
-              .then(audioDriveId => {
-                setItems(prev => {
-                  const cur = prev.find(i => i.id === story.id);
-                  if (!cur) return prev;
-                  const upd = Object.assign({}, cur, { audioDriveId });
-                  window.SW.itemPut(upd);
-                  return prev.map(i => i.id === story.id ? upd : i);
-                });
-              })
-              .catch(() => {});
-          }
         }).catch((err) => {
           if (err && err.name !== 'AbortError') {
             addToast(`Audio narration failed: ${err.message || 'Unknown error'}`);
@@ -231,8 +224,16 @@ function StoryWeaverApp() {
     const partial = weavingStory;
     if (!partial) return;
     ignoreWeaveRef.current = true;
-    if (abortRef.current) abortRef.current.abort(); // cancel image + audio in progress
-    const story = { type: 'story', createdAt: Date.now(), ...partial, audioReady: false };
+    if (abortRef.current) abortRef.current.abort();
+    const story = {
+      ...partial,
+      type:       'story',
+      version:    2,
+      createdAt:  Date.now(),
+      pages:      (partial.pages || []).map(p => ({ ...p, image: null })),
+      coverImage: null,
+      audioReady: false,
+    };
     await window.SW.itemPut(story);
     setItems(prev => [story, ...prev]);
     setWeavingStory(null);
@@ -299,7 +300,7 @@ function StoryWeaverApp() {
       window.SW.deleteSeed(id);
     } else {
       await window.SW.itemDelete(id);
-      window.SW.audioDelete(id).catch(() => {});
+      window.SW.audioDeleteStory(id).catch(() => {});
     }
     setItems(prev => prev.filter(i => i.id !== id));
     if (route.startsWith('/story/')) navigate('/');
