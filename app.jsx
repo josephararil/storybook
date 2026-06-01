@@ -84,6 +84,7 @@ function StoryWeaverApp() {
   const [character,  setCharacter]  = React.useState('');
 
   // ─── Overlay / modal state ────────────────────────────────
+  const [welcomeOpen,   setWelcomeOpen]   = React.useState(() => !localStorage.getItem('sw_welcome_seen'));
   const [keyModalOpen,  setKeyModalOpen]  = React.useState(false);
   const [addLinkOpen,   setAddLinkOpen]   = React.useState(false);
   const [editingLink,   setEditingLink]   = React.useState(null);
@@ -93,6 +94,13 @@ function StoryWeaverApp() {
   const [toasts,          setToasts]          = React.useState([]);
   const abortRef         = React.useRef(null);
   const ignoreWeaveRef   = React.useRef(false);
+
+  const dismissWelcome = () => {
+    localStorage.setItem('sw_welcome_seen', '1');
+    setWelcomeOpen(false);
+  };
+  const onWelcomeSetupGemini = () => { dismissWelcome(); setKeyModalOpen(true); };
+  const onWelcomeConnectDrive = () => { dismissWelcome(); window.SW.drive.connect().catch(() => {}); };
 
   const addToast = (msg, type = 'error') => {
     const id = Date.now();
@@ -362,6 +370,9 @@ function StoryWeaverApp() {
       )}
       {isWeaving && <Weaving t={theme} error={weaveError} phase={weavePhase} onCancel={onCancelWeave} onReadReady={weavingProgress.images.has(0) ? onReadReady : null} weavingProgress={weavingProgress} />}
 
+      {welcomeOpen && (
+        <WelcomeModal t={theme} onClose={dismissWelcome} onSetupGemini={onWelcomeSetupGemini} onConnectDrive={onWelcomeConnectDrive} />
+      )}
       {keyModalOpen && (
         <ApiKeyModal t={theme} open={keyModalOpen} onClose={() => setKeyModalOpen(false)} />
       )}
