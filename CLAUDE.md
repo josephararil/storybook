@@ -119,7 +119,7 @@ Audio data (WAV) is stored in a **separate IndexedDB object store** (`audio`, ke
 
 ```js
 {
-  id, title, scene, palette,
+  id, title,
   type:         'link',
   url:          'https://...',
   rating:       0,
@@ -128,6 +128,8 @@ Audio data (WAV) is stored in a **separate IndexedDB object store** (`audio`, ke
   coverDriveId: 'abc123XYZ',                   // Google Drive file ID (optional)
 }
 ```
+
+Note: `scene` and `palette` are no longer written by the modal on new items. Existing items in IndexedDB may still have these fields but they are unused — there are no SVG Cover fallbacks in the UI.
 
 ## Persistence Layer (`window.SW`)
 
@@ -207,7 +209,7 @@ const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
 
 `imageCall` (story covers) and `generateLinkCover` (link covers) both delegate to a private `callImageApi(prompt, signal)` in `store.js`. It:
 
-- Resolves the reference image: Sophie's hardcoded photo (`window.SOPHIE_IMAGE`) → Settings upload (`getSampleImage()`) → none
+- Resolves the reference image: Settings upload (`getSampleImage()`) takes priority; falls back to Sophie's hardcoded photo (`window.SOPHIE_IMAGE`); then none
 - Applies a 45-second hard timeout via a nested `AbortController`
 - POSTs to `getImageModel()` with the no-`generationConfig` format (see critical note below)
 - Returns a compressed WebP data URL via `compressToWebp`
@@ -239,7 +241,9 @@ Generation is **parallel** — text and image run simultaneously; audio starts a
 - **Attempt 2** (30 s): `sanitizeImagePrompt(prompt)` + reference image — strips "featuring [name]", "Feature the child [name] prominently", replaces "child" with "illustrated character"
 - **Attempt 3** (30 s): sanitized prompt, no reference image
 
-Each fallback emits `onProgress('imageRetry', reason)` (`'adjusting_prompt'` or `'no_reference'`), which `app.jsx` maps to a human-readable sub-message shown in the Weaving screen. All failures result in `null` (story saves without a cover).
+Each fallback emits `onProgress('imageRetry', reason)` (`'adjusting_prompt'` or `'no_reference'`), which `app.jsx` maps to a human-readable sub-message shown in the Weaving screen.
+
+**`PROHIBITED_CONTENT` handling:** If any attempt returns `finishReason: "PROHIBITED_CONTENT"`, `callImageApi` throws immediately with a user-visible message — no further retries. For `weaveStory`, the `imageCall(...).catch(() => null)` wrapper absorbs this and the story saves without a cover. For `generateLinkCover` (called from `AddLinkModal`), the error propagates to the UI, which displays it to the user. If all retries fail for other reasons, `callImageApi` returns `null` — callers must check for null and show an error.
 
 ### Image API Payload (critical — do not change format)
 
@@ -287,14 +291,14 @@ The Creator screen lifts all form state into `app.jsx`:
 
 | State | Default | Description |
 |---|---|---|
-| `context` | `"<childName> played in the garden…"` | Today's context / seed for the story |
-| `vocab` | `['curious','tiny','gentle']` | Vocabulary words to weave in |
+| `context` | `''` | Today's context / seed for the story; placeholder "What did you do today?" |
+| `vocab` | `[]` | Vocabulary words to weave in; user adds them as tags |
 | `length` | `4` | Target minutes (2–8) |
-| `tone` | `3` | 1=Calming → 5=Adventurous |
+| `tone` | `'Gentle'` | Tone string — any of the preset chips or free-text entry |
 | `storyStyle` | `'prose'` | `'prose'` or `'rhyme'` (AABB couplets) |
-| `character` | `''` | Optional character the child meets; free text or preset chip |
+| `character` | `''` | Optional character the child meets; plain text input |
 
-`CHARACTER_PRESETS` in `screens.jsx` = `['Rapunzel', 'a friendly dragon', 'a talking fox', 'a magical mermaid', 'a cloud fairy', 'a baby unicorn']`.
+`tone` is a **string** (not a number). `buildSystemPrompt`, `textCall`, and `imageCall` in `store.js` all accept a tone string directly; they fall back to `'Gentle'` if the string is empty. The UI renders five preset chips (Calming / Cozy / Gentle / Playful / Adventurous) plus a free-text input for custom tones. There are no character presets.
 
 ## Weaving Screen (Loading State)
 
@@ -314,35 +318,42 @@ Race conditions are handled via `ignoreWeaveRef` (a `useRef`): set to `true` on 
 
 `Toast({ toasts, onDismiss })` in `screens.jsx` renders error/success banners above the bottom nav. `addToast(msg, type)` in `app.jsx` auto-dismisses after 7s. Used for background failures (audio narration) that can't surface through the Weaving screen.
 
-## AddLinkModal (Link a Storybook)
+## AddLinkModal (Link / Edit Cover)
 
-Opened from Creator → "Gemini Storybook" card, or the pencil edit button on any link in the library. Fields:
+Opened from Creator → "Gemini Storybook" card, or the **pencil button on any library card** (both link items and AI-generated stories).
 
-| Field | Notes |
-|---|---|
-| Gemini URL | Required; opens in a new tab when the card is tapped |
-| Title | Required |
-| Scene | SVG fallback scene — only shown when no `coverImage` |
-| Palette | SVG fallback palette — only shown when no `coverImage` |
-| Cover Image | Optional AI-generated cover; free-text prompt → `generateLinkCover` |
+The modal has two modes controlled by `isLink = !item || item.type === 'link'`:
+
+| Mode | Title | Fields shown | Save payload |
+|---|---|---|---|
+| New link (`!item`) | "Link a Storybook" | URL (required), Title (required), Cover Image | `{ url, title, coverImage }` |
+| Edit link (`item.type === 'link'`) | "Edit Storybook" | URL (required), Title (required), Cover Image | `{ url, title, coverImage }` |
+| Edit story (`item.type === 'story'`) | "Edit Cover" | Cover Image only | `{ coverImage }` |
+
+Scene and Palette fields have been removed — there are no SVG fallback options in the modal.
 
 **Cover generation flow:**
-1. User types a description of the storybook in the textarea
+1. User types a description in the textarea
 2. "Generate cover" calls `window.SW.generateLinkCover(description, signal)`
 3. The local `AbortController` is stored in `abortRef`; a `useEffect` cleanup aborts it on unmount
-4. On success: `coverImage` state is set; the SVG `<Cover>` preview is replaced by a `<img>` with a × to clear it
-5. `coverImage` (data URL or null) is always included in the `onSave` payload and spread onto the item in `onSaveLink`
+4. On success: `coverImage` state is set; the placeholder is replaced by an `<img>` with a × to clear it
+5. On `PROHIBITED_CONTENT` or null result: `coverError` is set and shown to the user
+6. `coverImage` is always included in the `onSave` payload; for story items `onSaveLink` spreads it onto the existing item
 
 ## Library Cards (`StoryCard`, `EditorialGrid`)
 
-Both `StoryCard` (grid layouts) and the hero slot in `EditorialGrid` render `item.coverImage` as an `<img>` when the field is present and non-null. Otherwise they fall back to the SVG `<Cover>` component. This applies to both AI-generated stories and linked storybooks that have had a cover generated.
+Both `StoryCard` (grid layouts) and the hero slot in `EditorialGrid` render `item.coverImage` as an `<img>` when the field is present and non-null. Otherwise they show a simple 📖 emoji placeholder — there is no SVG Cover fallback.
+
+Every card shows a pencil button (not just link items). Clicking it opens `AddLinkModal` in the appropriate mode — "Edit Storybook" for links, "Edit Cover" for AI-generated stories.
+
+**Library filters:** Three chips — All / Stories / Linked. "Stories" matches `item.type === 'story'` (includes seeds); "Linked" matches `item.type === 'link'`. The old category chips (Bedtime, Animals, etc.) have been removed.
 
 ## Reader Screen
 
 The Reader renders the story overlay at `z-index: 100`. Key features:
 
 - If `story.coverImage` exists (AI-generated): renders as a tappable `<img>` with `cursor: zoom-in`; clicking opens a fullscreen **lightbox** (`z-index: 300`, blurred backdrop) showing the image at up to `92vw / 88vh`. Tap backdrop or × to close.
-- If no `coverImage` (seed stories): renders the SVG `<Cover>` component instead.
+- If no `coverImage` (seed stories or stories without a generated cover): renders a 📖 emoji placeholder — there is no SVG Cover fallback.
 - Star rating (1–5), persisted immediately via `onRate`.
 - "Delete story" button always shown (seeds and user stories alike).
 
@@ -375,9 +386,11 @@ The active theme is a single object (`TH_STARRY`) passed as the `t` prop to all 
 
 ## Sophie Reference Photo (`sophie.js`)
 
-`sophie.js` sets `window.SOPHIE_IMAGE = { mimeType: "image/jpeg", data: "<base64>" }`. This is loaded as a plain `<script>` (not Babel) before `store.js`. The image is Sophie's photo compressed to ~69 KB JPEG. It is automatically used as the reference seed image for all AI cover generation.
+`sophie.js` sets `window.SOPHIE_IMAGE = { mimeType: "image/jpeg", data: "<base64>" }`. This is loaded as a plain `<script>` (not Babel) before `store.js`. The image is Sophie's photo compressed to ~69 KB JPEG. It is used as the fallback reference image for AI cover generation.
 
-To update the photo: convert the new image to base64 JPEG and replace the `data` value in `sophie.js`.
+**Priority:** `callImageApiOnce` checks `getSampleImage()` (user's upload from Settings → Illustration Reference) first. Only if no user image is stored does it fall back to `window.SOPHIE_IMAGE`. This means uploading a photo in Settings fully overrides `sophie.js` for all subsequent cover generation.
+
+To update the default photo: convert the new image to base64 JPEG and replace the `data` value in `sophie.js`.
 
 ## Service Worker Cache
 
