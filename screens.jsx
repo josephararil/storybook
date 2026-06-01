@@ -1407,7 +1407,7 @@ function Toast({ toasts, onDismiss }) {
 }
 
 // ─── Weaving (loading / error) ────────────────────────────────
-function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
+function Weaving({ t, error, phase, onCancel, onReadReady, weavingProgress }) {
   const childName = window.SW?.getChildName() || 'your child';
   const [elapsed, setElapsed] = useState(0);
 
@@ -1418,42 +1418,25 @@ function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
     return () => clearInterval(id);
   }, [error]);
 
-  const phases = [
-    { key: 'text',  label: 'Writing your story'  },
-    { key: 'image', label: 'Painting the cover'   },
-    { key: 'audio', label: 'Recording narration'  },
-  ];
-
-  // Parallel-aware state: 'text' phase = text + image both active simultaneously.
-  // 'imagePending' = text done, image + audio both active.
-  const getState = (key) => {
-    if (phase === 'text') {
-      if (key === 'text' || key === 'image') return 'active';
-      return 'pending';
-    }
-    if (phase === 'imagePending') {
-      if (key === 'text') return 'done';
-      if (key === 'image' || key === 'audio') return 'active';
-      return 'pending';
-    }
-    // Legacy fallback for other phase strings
-    const currentIdx = phases.findIndex(p => p.key === phase);
-    const i = phases.findIndex(p => p.key === key);
-    return i < currentIdx ? 'done' : i === currentIdx ? 'active' : 'pending';
-  };
-
   const fmtElapsed = (s) => s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 
-  const container = {
+  const { total = 0, images = new Set(), audios = new Set(), retries = {} } = weavingProgress || {};
+  const showGrid = total > 0;
+
+  const bgBase = {
     position: 'absolute', inset: 0, zIndex: 90,
     background: 'radial-gradient(90% 70% at 50% 30%, #1e1b4b 0%, #050514 80%)',
-    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-    padding: '60px 32px 100px', overflow: 'hidden',
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
   };
+
+  const errorContainer = { ...bgBase, justifyContent: 'center', padding: '60px 32px 100px', overflow: 'hidden' };
+  const container = showGrid
+    ? { ...bgBase, justifyContent: 'flex-start', padding: '44px 24px 100px', overflowY: 'auto', overflowX: 'hidden' }
+    : { ...bgBase, justifyContent: 'center', padding: '60px 32px 100px', overflow: 'hidden' };
 
   if (error) {
     return (
-      <div style={container}>
+      <div style={errorContainer}>
         <div style={{
           background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239,68,68,0.3)',
           borderRadius: 24, padding: 32, textAlign: 'center', maxWidth: 320,
@@ -1483,65 +1466,111 @@ function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
         @keyframes sw-fadein  { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
       `}</style>
 
-      {/* Animated orb */}
-      <div style={{ position: 'relative', width: 220, height: 220, marginBottom: 44 }}>
-        <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `1px dashed ${t.accent}55`, animation: 'sw-orbit 24s linear infinite' }} />
-        <div style={{ position: 'absolute', inset: 28, borderRadius: '50%', border: `1px dashed ${t.accent}33`, animation: 'sw-orbit-r 16s linear infinite' }} />
-        {[0, 120, 240].map((deg, i) => (
-          <div key={i} style={{ position: 'absolute', inset: 0, animation: `sw-orbit ${10 + i * 4}s linear infinite` }}>
-            <div style={{
-              position: 'absolute', top: -6, left: '50%', marginLeft: -6, width: 12, height: 12,
-              borderRadius: 999, background: t.accent,
-              boxShadow: `0 0 18px ${t.accent}, 0 0 6px #fff`,
-              transform: `rotate(${deg}deg)`, animation: 'sw-twinkle 1.6s ease-in-out infinite',
-            }} />
+      {/* Orb: full-size during text phase, compact star during assets phase */}
+      {!showGrid ? (
+        <div style={{ position: 'relative', width: 220, height: 220, marginBottom: 44, flexShrink: 0 }}>
+          <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: `1px dashed ${t.accent}55`, animation: 'sw-orbit 24s linear infinite' }} />
+          <div style={{ position: 'absolute', inset: 28, borderRadius: '50%', border: `1px dashed ${t.accent}33`, animation: 'sw-orbit-r 16s linear infinite' }} />
+          {[0, 120, 240].map((deg, i) => (
+            <div key={i} style={{ position: 'absolute', inset: 0, animation: `sw-orbit ${10 + i * 4}s linear infinite` }}>
+              <div style={{
+                position: 'absolute', top: -6, left: '50%', marginLeft: -6, width: 12, height: 12,
+                borderRadius: 999, background: t.accent,
+                boxShadow: `0 0 18px ${t.accent}, 0 0 6px #fff`,
+                transform: `rotate(${deg}deg)`, animation: 'sw-twinkle 1.6s ease-in-out infinite',
+              }} />
+            </div>
+          ))}
+          <div style={{
+            position: 'absolute', inset: 56, borderRadius: '50%',
+            background: `radial-gradient(circle at 35% 35%, #fde68a, ${t.accent} 70%)`,
+            boxShadow: `0 0 60px ${t.accent}80, 0 0 120px ${t.accent}55, inset -10px -16px 30px rgba(0,0,0,0.35)`,
+            animation: 'sw-breathe 3.2s ease-in-out infinite',
+          }} />
+        </div>
+      ) : (
+        <div style={{ fontSize: 28, marginBottom: 16, animation: 'sw-breathe 3.2s ease-in-out infinite', flexShrink: 0 }}>✦</div>
+      )}
+
+      <div style={{ textAlign: 'center', width: '100%', maxWidth: 360 }}>
+
+        {/* Title — full during text phase, compact during assets phase */}
+        {!showGrid ? (
+          <>
+            <div style={{ color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 2.4, textTransform: 'uppercase', marginBottom: 12 }}>Weaving</div>
+            <h1 style={{ margin: 0, fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle, fontSize: 30, lineHeight: 1.15, color: t.text, letterSpacing: -0.5 }}>
+              A new story for {childName}…
+            </h1>
+          </>
+        ) : (
+          <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 18, color: t.text, marginBottom: 4 }}>
+            A new story for {childName}
           </div>
-        ))}
+        )}
+
+        {/* Writing your story row */}
         <div style={{
-          position: 'absolute', inset: 56, borderRadius: '50%',
-          background: `radial-gradient(circle at 35% 35%, #fde68a, ${t.accent} 70%)`,
-          boxShadow: `0 0 60px ${t.accent}80, 0 0 120px ${t.accent}55, inset -10px -16px 30px rgba(0,0,0,0.35)`,
-          animation: 'sw-breathe 3.2s ease-in-out infinite',
-        }} />
-      </div>
-
-      <div style={{ textAlign: 'center', maxWidth: 320 }}>
-        <div style={{ color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 2.4, textTransform: 'uppercase', marginBottom: 12 }}>Weaving</div>
-        <h1 style={{
-          margin: 0, fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle,
-          fontSize: 30, lineHeight: 1.15, color: t.text, letterSpacing: -0.5,
-        }}>A new story for {childName}…</h1>
-
-        {/* Phase progress */}
-        <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
-          {phases.map((p) => {
-            const state = getState(p.key);
-            return (
-              <div key={p.key} style={{
-                display: 'flex', alignItems: 'center', gap: 10,
-                fontFamily: t.fontBody, fontWeight: 600, fontSize: 15,
-                color: state === 'done' ? t.textMuted : state === 'active' ? t.text : `${t.textMuted}44`,
-                animation: state === 'active' ? 'sw-fadein 0.4s ease-out forwards' : 'none',
-              }}>
-                {state === 'done' && <span style={{ color: '#4ade80', fontSize: 15, lineHeight: 1 }}>✓</span>}
-                {state === 'active' && (
-                  <div style={{
-                    width: 13, height: 13, borderRadius: '50%', flexShrink: 0,
-                    border: `2px solid ${t.accent}`, borderTopColor: 'transparent',
-                    animation: 'sw-spin 0.75s linear infinite',
-                  }} />
-                )}
-                {state === 'pending' && <span style={{ fontSize: 13, opacity: 0.3 }}>·</span>}
-                {p.label}
-              </div>
-            );
-          })}
+          marginTop: showGrid ? 8 : 24,
+          display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center',
+          fontFamily: t.fontBody, fontWeight: 600, fontSize: 15,
+          color: showGrid ? t.textMuted : t.text,
+        }}>
+          {showGrid
+            ? <span style={{ color: '#4ade80', fontSize: 15, lineHeight: 1 }}>✓</span>
+            : <div style={{ width: 13, height: 13, borderRadius: '50%', flexShrink: 0, border: `2px solid ${t.accent}`, borderTopColor: 'transparent', animation: 'sw-spin 0.75s linear infinite' }} />
+          }
+          Writing your story
         </div>
 
-        {/* Retry sub-message */}
-        {subMessage && (
-          <div style={{ marginTop: 10, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12, fontStyle: 'italic', opacity: 0.75, animation: 'sw-fadein 0.4s ease-out' }}>
-            {subMessage}
+        {/* Page grid — shown once asset fan-out begins */}
+        {showGrid && (
+          <div style={{
+            marginTop: 16,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))',
+            gap: 6,
+            animation: 'sw-fadein 0.4s ease-out forwards',
+          }}>
+            {Array.from({ length: total }, (_, idx) => {
+              const imgDone = images.has(idx);
+              const audDone = audios.has(idx);
+              const retry   = retries[idx];
+              return (
+                <div key={idx} style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  borderRadius: 10, padding: '6px 4px',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                }}>
+                  <span style={{ fontSize: 9, color: t.textMuted, fontFamily: t.fontBody, fontWeight: 700 }}>
+                    p{idx + 1}
+                  </span>
+                  <div style={{ display: 'flex', gap: 7 }}>
+                    {/* image pip */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                      {imgDone
+                        ? <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#4ade80' }} />
+                        : <div style={{ width: 9, height: 9, borderRadius: '50%', border: `1.5px solid ${t.accent}`, borderTopColor: 'transparent', animation: 'sw-spin 0.75s linear infinite' }} />
+                      }
+                      <span style={{ fontSize: 7, color: t.textMuted, fontFamily: t.fontBody }}>img</span>
+                    </div>
+                    {/* audio pip */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                      {audDone
+                        ? <div style={{ width: 9, height: 9, borderRadius: '50%', background: '#4ade80' }} />
+                        : <div style={{ width: 9, height: 9, borderRadius: '50%', border: `1.5px solid ${t.accent}`, borderTopColor: 'transparent', animation: 'sw-spin 0.75s linear infinite' }} />
+                      }
+                      <span style={{ fontSize: 7, color: t.textMuted, fontFamily: t.fontBody }}>aud</span>
+                    </div>
+                  </div>
+                  {retry && (
+                    <span style={{ fontSize: 8, color: t.accent, fontStyle: 'italic', fontFamily: t.fontBody }}>
+                      {retry === 'adjusting_prompt' ? 'adj' : 'no ref'}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -1552,22 +1581,22 @@ function Weaving({ t, error, phase, onCancel, onSkipImage, subMessage }) {
           </div>
         )}
 
-        {/* Skip button — shown once story text is ready */}
-        {(phase === 'imagePending' || phase === 'image' || phase === 'audio') && onSkipImage && (
-          <button onClick={onSkipImage} style={{
-            marginTop: 24, padding: '12px 26px', borderRadius: 14,
+        {/* Read what's ready — active once page 1 has an image */}
+        {onReadReady && (
+          <button onClick={onReadReady} style={{
+            marginTop: 20, padding: '12px 26px', borderRadius: 14,
             background: t.accentSoft, border: `1px solid ${t.accent}55`,
             color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
             cursor: 'pointer', animation: 'sw-fadein 0.5s ease-out forwards',
           }}>
-            {phase === 'audio' ? 'Skip narration · Read now' : 'Skip cover · Read now'}
+            Read what's ready
           </button>
         )}
 
         {/* Cancel button */}
         {onCancel && (
           <button onClick={onCancel} style={{
-            marginTop: phase === 'image' ? 10 : 28,
+            marginTop: onReadReady ? 10 : 28,
             background: 'transparent', border: 'none', cursor: 'pointer',
             color: t.textMuted, fontFamily: t.fontBody, fontSize: 13, fontWeight: 600,
             padding: '8px 16px', opacity: 0.65,
