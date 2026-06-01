@@ -112,7 +112,10 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 
 Per-page audio is stored in the **`audio` IndexedDB store** keyed as `${storyId}::${pageIdx}` (e.g. `my-story::0`, `my-story::1`). The legacy single-story audio key (bare `storyId`) is still used by `audioGet/audioPut/audioDelete`; per-page callers use `audioGetPage/audioPutPage/audioDeleteStory`. `audioReady: true` on the story signals all pages' audio has settled.
 
-**Known limitation (out of scope until a future milestone):** per-page images and audio are not backed up to Google Drive individually. Only `pages[0].image` is uploaded as the story "cover" (`coverDriveId`).
+**Out of scope (future milestones):**
+- Per-page Drive backup — only `pages[0].image` is uploaded as the story "cover" (`coverDriveId`); individual page images and audio are not backed up.
+- Single-page regeneration — there is no UI to re-generate one page's image or audio independently.
+- Per-page voice customisation — all pages use the same TTS voice; per-page overrides are not supported.
 
 **Legacy AI stories** (no `version` field, had `body: string[]`) are wiped on first load via a one-time migration (`sw_v2_migrated` localStorage flag). Seeds are unaffected.
 
@@ -237,7 +240,7 @@ Generation fans out per-page in parallel after text resolves:
 `onProgress` phase keys:
 - `'text'` / null — text call starting
 - `'assets'` / `{ story, total }` — text done, assets fanning out (`app.jsx` maps to `'imagePending'` UI state)
-- `'pageAsset'` / `{ idx, kind, ok }` — one image or audio settled (M4 will render per-page progress)
+- `'pageAsset'` / `{ idx, kind, ok }` — one image or audio settled (rendered as progress pips in the Weaving screen)
 - `'imageRetry'` / `{ idx, reason }` — per-page image retry fallback
 
 ### Image Safety & Retry Logic
@@ -417,7 +420,7 @@ To update the default photo: convert the new image to base64 JPEG and replace th
 
 ## Service Worker Cache
 
-The cache is keyed `storyweaver-v3` in `sw.js`. Bump this string when you need to force-clear CDN caches on existing installs (app files are network-first and don't need a bump).
+The cache is keyed `storyweaver-v4` in `sw.js`. Bump this string when you need to force-clear CDN caches on existing installs (app files are network-first and don't need a bump).
 
 **Local dev note:** app files are network-first so they always load fresh when online. CDN resources are still cached aggressively. If you need a completely clean slate, unregister the SW and clear caches:
 ```js
