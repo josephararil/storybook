@@ -84,21 +84,36 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 }
 ```
 
-**AI-generated stories** (persisted in IndexedDB `items` store) additionally have:
+**AI-generated stories** (v2, persisted in IndexedDB `items` store) have:
 
 ```js
 {
-  ...above,
-  type:         'story',
-  coverImage:   'data:image/webp;base64,...',  // AI-generated cover, or null
-  coverDriveId: 'abc123XYZ',                   // Google Drive file ID (optional; set when Drive is connected)
-  audioReady:   true,                          // true when a WAV narration exists in the 'audio' IDB store
-  audioDriveId: 'abc123XYZ',                   // Google Drive file ID for audio (optional)
-  createdAt:    1234567890,                    // Date.now() timestamp
+  id, title, category, rating, palette, scene, vocab,
+  type:      'story',
+  version:   2,                // v2 marker — anything without this is a legacy story
+  pages:     [Page, ...],      // 4–14 entries (MIN_PAGES / MAX_PAGES constants in store.js)
+  coverImage: 'data:image/webp;base64,...',  // still generated separately; null if failed
+  coverDriveId: 'abc123XYZ',  // Google Drive file ID (optional)
+  audioReady: false,           // true once whole-story audio WAV is stored (legacy path; per-page audio is M2)
+  audioDriveId: 'abc123XYZ',  // Google Drive file ID for audio (optional)
+  createdAt:  1234567890,      // Date.now() timestamp
 }
 ```
 
-Audio data (WAV, ~7–12 MB per story) is stored in a **separate IndexedDB object store** (`audio`, key `id`), not in the story object itself, to keep the `items` store lean. `audioReady: true` on the story signals that audio is available locally; `audioDriveId` is set when it has also been uploaded to Drive.
+**`Page` shape** (stored inline on the story object):
+
+```js
+{
+  text:        "On-screen prose (≤ ~35 words, may contain {vocab} braces)",
+  imagePrompt: "Dense scene description for image model (~40–60 words, no text/lettering)",
+  audioPrompt: "Narration text (plain words, no braces) with 1–2 inline audio tags like [whispers]",
+  // image and audio fields added in M2 (per-page asset generation — not yet implemented)
+}
+```
+
+Audio data (WAV) is stored in a **separate IndexedDB object store** (`audio`, key `id`), not in the story object itself. `audioReady: true` on the story signals that audio is available locally.
+
+**Legacy AI stories** (no `version` field, had `body: string[]`) will be wiped by a one-time migration in M2. Until then they render via the existing Reader unchanged.
 
 **Link items** (manually added) have:
 
@@ -243,11 +258,11 @@ Generated dynamically per request using a sectioned structure:
 
 | Section | Contents |
 |---|---|
-| `[CHARACTER]` | Dynamic child name; companion line (specific if `form.character` set, generic otherwise) |
-| `[TONE & STYLE]` | Dynamic tone word (Calming–Adventurous); prose sentence rules **or** AABB rhyme rules; sensory detail guidance; restricted words list |
-| `[NARRATIVE ARC]` | Dynamic paragraph count (`targetParas = max(4, round(length / 0.65))`); named beats: Discovery → Meeting → Exploration & Interaction (middle paragraphs, count = `targetParas − 4`) → Comfort → Resolution |
-| `[VOCABULARY RULES]` | `{word}` brace wrapping rules; unbraced in `vocab[]` |
-| `[SCHEMA]` | Valid enum values, palette format, id format, 40–60 word per paragraph constraint |
+| `[CHARACTER & TONE]` | Dynamic child name; companion line (specific if `form.character` set, generic otherwise); tone word; atmosphere; restricted words |
+| `[STYLE & FORMATTING]` | Prose sentence rules **or** AABB rhyme rules; vocabulary brace requirement |
+| `[NARRATIVE ARC]` | Dynamic page count (`targetPages = clamp(round(length / 0.65), MIN_PAGES, MAX_PAGES)`); named page beats: Discovery → Exploration (middle pages) → Comfort → Resolution |
+| `[PAGE FIELDS]` | Per-page rules: `text` (≤ ~35 words, vocab braces here only), `imagePrompt` (~40–60 words, no text/lettering), `audioPrompt` (plain narration + 1–2 audio tags from curated list) |
+| `[JSON SCHEMA OUTPUT]` | Valid enum values, palette format, id format; `pages` array count |
 
 If a custom system prompt is saved via the AI Configuration panel (`sw_system_prompt` in localStorage), it replaces the built-in entirely. `getDefaultSystemPrompt()` returns the built-in rendered with default form values and the current child name — used by the modal's "Load default" button.
 

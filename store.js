@@ -5,6 +5,9 @@ const DEFAULT_TEXT_MODEL  = "gemini-3.5-flash";
 const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_AUDIO_MODEL = "gemini-2.5-flash-preview-tts";
 
+const MIN_PAGES = 4;
+const MAX_PAGES = 14;
+
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
 
@@ -267,6 +270,17 @@ function uint8ArrayToBase64(bytes) {
 }
 
 // ─── Story schema ─────────────────────────────────────────────
+const PAGE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    text:        { type: 'STRING' },
+    imagePrompt: { type: 'STRING' },
+    audioPrompt: { type: 'STRING' },
+  },
+  required: ['text', 'imagePrompt', 'audioPrompt'],
+  propertyOrdering: ['text', 'imagePrompt', 'audioPrompt'],
+};
+
 const STORY_SCHEMA = {
   type: 'OBJECT',
   properties: {
@@ -277,10 +291,10 @@ const STORY_SCHEMA = {
     palette:  { type: 'ARRAY', items: { type: 'STRING' } },
     scene:    { type: 'STRING', enum: ['moon','fox','unicorn','whale','dragon','bear','cloud','turtle'] },
     vocab:    { type: 'ARRAY', items: { type: 'STRING' } },
-    body:     { type: 'ARRAY', items: { type: 'STRING' } },
+    pages:    { type: 'ARRAY', items: PAGE_SCHEMA, minItems: MIN_PAGES, maxItems: MAX_PAGES },
   },
-  required: ['id','title','category','rating','palette','scene','vocab','body'],
-  propertyOrdering: ['id','title','category','rating','palette','scene','vocab','body'],
+  required: ['id','title','category','rating','palette','scene','vocab','pages'],
+  propertyOrdering: ['id','title','category','rating','palette','scene','vocab','pages'],
 };
 
 const VALID_SCENES     = ['moon','fox','unicorn','whale','dragon','bear','cloud','turtle'];
@@ -294,7 +308,7 @@ function guessScene(context) {
 }
 
 // ─── Gemini API calls ─────────────────────────────────────────
-function buildSystemPrompt(form, childName, targetParas) {
+function buildSystemPrompt(form, childName, targetPages) {
   const toneWord = TONE_WORDS[(form.tone || 3) - 1];
 
   const companionLine = form.character?.trim()
@@ -309,23 +323,24 @@ function buildSystemPrompt(form, childName, targetParas) {
       ].join(' ')
     : `Structure: Use short, clear sentences. Vary the rhythm so it sounds natural and conversational when read aloud. Use present tense.`;
 
-  // Adjust narrative pacing dynamically to fit targetParas exactly
   let narrativeArc = [];
-  if (targetParas <= 3) {
+  if (targetPages <= 3) {
     narrativeArc = [
-      `1. Discovery & Meeting: ${childName} finds a magical element in a safe setting and warmly meets her companion.`,
-      `2. Exploration: They play and collaborate using a gentle magical mechanic.`,
-      `3. Resolution: A soft transition to rest. ${childName} feels safe and sleepy. End peacefully.`
+      `Page 1. Discovery & Meeting: ${childName} finds a magical element in a safe setting and warmly meets her companion.`,
+      `Page 2. Exploration: They play and collaborate using a gentle magical mechanic.`,
+      `Page 3. Resolution: A soft transition to rest. ${childName} feels safe and sleepy. End peacefully.`,
     ];
   } else {
-    const middleCount = targetParas - 3; // Subtracting Intro, Comfort, and Resolution
+    const middleCount = targetPages - 3;
     narrativeArc = [
-      `1. Discovery & Meeting: ${childName} finds a magical element in a safe setting and warmly introduces herself to her companion.`,
-      `2 to ${1 + middleCount}. Exploration: Across these middle paragraphs, they explore and play using a gentle magical mechanic (e.g., floating on a cloud). Deepen their connection.`,
-      `${2 + middleCount}. Comfort: A gentle transition toward rest. A soft problem is solved (e.g., finding a lost blanket) or a quiet realization is shared.`,
-      `${3 + middleCount}. Resolution: The companion settles down. ${childName} feels safe, loved, and sleepy. End on absolute warmth and peace.`
+      `Page 1. Discovery & Meeting: ${childName} finds a magical element in a safe setting and warmly introduces herself to her companion.`,
+      `Pages 2 to ${1 + middleCount}. Exploration: Across these middle pages, they explore and play using a gentle magical mechanic. Deepen their connection.`,
+      `Page ${2 + middleCount}. Comfort: A gentle transition toward rest. A soft problem is solved or a quiet realization is shared.`,
+      `Page ${3 + middleCount}. Resolution: The companion settles down. ${childName} feels safe, loved, and sleepy. End on absolute warmth and peace.`,
     ];
   }
+
+  const audioTagList = '[whispers], [softly], [gently], [laughs], [gasps], [sighs], [pauses], [wonders]';
 
   return [
     `You are an expert children's author writing warm, comforting bedtime stories. Return ONLY valid JSON matching the exact schema requested.`,
@@ -339,16 +354,21 @@ function buildSystemPrompt(form, childName, targetParas) {
     ``,
     `[STYLE & FORMATTING]`,
     sentenceRules,
-    `Vocabulary Requirement: Every word in the provided vocabulary list MUST appear in the story text wrapped in curly braces (e.g., {gentle}). Do not alter the word inside the braces.`,
+    `Vocabulary Requirement: Every word in the provided vocabulary list MUST appear in at least one page's "text" field, wrapped in curly braces (e.g., {gentle}). Do not alter the word inside the braces.`,
     ``,
-    `[NARRATIVE ARC (${targetParas} total sections)]`,
+    `[NARRATIVE ARC (${targetPages} total pages)]`,
     ...narrativeArc,
+    ``,
+    `[PAGE FIELDS — required for every page object]`,
+    `text: On-screen prose for this page. ≤ ~35 words. Designed to be heard while a single illustration is shown. Vocab braces apply here only.`,
+    `imagePrompt: Dense, concrete scene description for the image model. Include: setting, characters (describe ${childName} as "a young girl with [hair colour]"), their action, lighting, mood, and art style (soft watercolour children's book illustration). No text or lettering in the image. ~40–60 words.`,
+    `audioPrompt: Narration text for TTS. Same words as "text" but with all {vocab} braces removed (plain words). Add 1–2 inline audio tags for pacing chosen from: ${audioTagList}. Page 1's audioPrompt should be punchier — it doubles as a hook. Never more than 2 tags per page.`,
     ``,
     `[JSON SCHEMA OUTPUT]`,
     `scene ∈ {moon,fox,unicorn,whale,dragon,bear,cloud,turtle}`,
     `category ∈ {Bedtime,Animals,Magic,Adventure,Friends}`,
     `palette: Exactly 3 #rrggbb hex codes (dark base, mid tone, light accent). id: kebab-case from title. rating: 0.`,
-    `body: Array of strings. Each string represents one section of the narrative arc. Keep sections concise but descriptive.`
+    `pages: Array of exactly ${targetPages} page objects, one per narrative page. Each must have text, imagePrompt, and audioPrompt.`,
   ].filter(Boolean).join('\n');
 }
 
@@ -363,9 +383,9 @@ function getDefaultSystemPrompt() {
 async function textCall(form, existingIds, signal) {
   const toneWord    = TONE_WORDS[form.tone - 1];
   const childName   = getChildName();
-  const targetParas = Math.max(4, Math.round(form.length / 0.65));
+  const targetPages = Math.min(MAX_PAGES, Math.max(MIN_PAGES, Math.round(form.length / 0.65)));
   const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
-  const sysPrompt   = getCustomSystemPrompt() || buildSystemPrompt(form, childName, targetParas);
+  const sysPrompt   = getCustomSystemPrompt() || buildSystemPrompt(form, childName, targetPages);
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${getTextModel()}:generateContent`,
@@ -377,7 +397,7 @@ async function textCall(form, existingIds, signal) {
         systemInstruction: { parts: [{ text: sysPrompt }] },
         contents: [{
           role: 'user',
-          parts: [{ text: `Context: ${form.context}\nTone: ${toneWord}\nTarget length: ~${targetParas} paragraphs${vocabStr}` }],
+          parts: [{ text: `Context: ${form.context}\nTone: ${toneWord}\nTarget length: ~${targetPages} pages${vocabStr}` }],
         }],
         generationConfig: {
           responseMimeType: 'application/json',
@@ -405,9 +425,9 @@ async function textCall(form, existingIds, signal) {
   story.palette  = Array.isArray(story.palette) && story.palette.length >= 3
     ? story.palette.slice(0, 3)
     : ['#0f172a','#312e81','#fbbf24'];
-  story.scene    = VALID_SCENES.includes(story.scene)       ? story.scene    : 'moon';
+  story.scene    = VALID_SCENES.includes(story.scene)        ? story.scene    : 'moon';
   story.category = VALID_CATEGORIES.includes(story.category) ? story.category : 'Bedtime';
-  if (!Array.isArray(story.body))  story.body  = [];
+  if (!Array.isArray(story.pages)) story.pages = [];
   if (!Array.isArray(story.vocab)) story.vocab = [];
   story.id = uniqueId(slugify(story.title), existingIds);
 
