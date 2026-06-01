@@ -1197,7 +1197,7 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
       if (!cancelled) { setAudioByPage(map); setAudiosLoaded(true); }
     })();
     return () => { cancelled = true; };
-  }, [story.id]);
+  }, [story.id, story.audioReady]);
 
   // Auto-play when page changes or audio becomes available
   useEffect(() => {

@@ -701,7 +701,7 @@ async function weaveStory(form, existingIds, signal, onProgress) {
     audioReady: false,
   };
 
-  // assetsPromise resolves once all per-page audio has settled
+  // assetsPromise resolves once all per-page audio has settled — individual entries may be null if TTS failed
   const assetsPromise = Promise.all(audioPromises);
 
   return { story, assetsPromise };
