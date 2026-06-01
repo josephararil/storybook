@@ -235,6 +235,7 @@ function StoryWeaverApp() {
 
   const onReadReady = () => {
     if (abortRef.current) abortRef.current.abort();
+    setWeavingProgress({ total: 0, images: new Set(), audios: new Set(), retries: {} });
     // Don't set ignoreWeaveRef — let onWeave complete normally and save with whatever images resolved
   };
 
