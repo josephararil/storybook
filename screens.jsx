@@ -928,8 +928,8 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
   );
 }
 
-// ─── Reader ───────────────────────────────────────────────────
-function Reader({ t, story, onClose, onRate, onDelete }) {
+// ─── LegacyReader (seed stories + non-v2 AI stories) ─────────
+function LegacyReader({ t, story, onClose, onRate, onDelete }) {
   const [rating,       setRating]       = useState(story.rating || 0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [playing,      setPlaying]      = useState(false);
@@ -1165,6 +1165,216 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
       )}
     </div>
   );
+}
+
+// ─── PagedReader (v2 AI stories with pages[]) ─────────────────
+function PagedReader({ t, story, onClose, onRate, onDelete }) {
+  const [currentPage, setCurrentPage] = useState(0);
+  const [playing,     setPlaying]     = useState(false);
+  const [audioByPage, setAudioByPage] = useState({});
+  const [audiosLoaded,setAudiosLoaded]= useState(false);
+  const [imageZoom,   setImageZoom]   = useState(false);
+  const [rating,      setRating]      = useState(story.rating || 0);
+  const [tapHint,     setTapHint]     = useState(false);
+  const audioRef    = useRef(null);
+  const tapHintRef  = useRef(null);
+
+  const pages      = story.pages || [];
+  const page       = pages[currentPage] || null;
+  const isLastPage = currentPage === pages.length - 1;
+  const audioSrc   = audioByPage[currentPage] || null;
+
+  // Load all per-page audios once on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const map = {};
+      for (let i = 0; i < pages.length; i++) {
+        const src = await window.SW.audioGetPage(story.id, i);
+        if (cancelled) return;
+        map[i] = src || null;
+      }
+      if (!cancelled) { setAudioByPage(map); setAudiosLoaded(true); }
+    })();
+    return () => { cancelled = true; };
+  }, [story.id]);
+
+  // Auto-play when page changes or audio becomes available
+  useEffect(() => {
+    if (tapHintRef.current) clearTimeout(tapHintRef.current);
+    setTapHint(false);
+    if (!audiosLoaded) return;
+    const el = audioRef.current;
+    if (!el) return;
+    if (audioSrc) {
+      el.src = audioSrc;
+      el.currentTime = 0;
+      el.play().catch(() => {});
+    } else {
+      tapHintRef.current = setTimeout(() => setTapHint(true), 6000);
+    }
+  }, [currentPage, audioSrc, audiosLoaded]);
+
+  // Pause + clear hint on unmount
+  useEffect(() => () => {
+    if (audioRef.current) audioRef.current.pause();
+    if (tapHintRef.current) clearTimeout(tapHintRef.current);
+  }, []);
+
+  const goNext = () => {
+    if (currentPage < pages.length - 1) {
+      if (audioRef.current) audioRef.current.pause();
+      setCurrentPage(p => p + 1);
+    }
+  };
+  const goPrev = () => {
+    if (currentPage > 0) {
+      if (audioRef.current) audioRef.current.pause();
+      setCurrentPage(p => p - 1);
+    }
+  };
+  const togglePlay = () => {
+    const el = audioRef.current;
+    if (!el || !audioSrc) return;
+    if (playing) el.pause(); else el.play().catch(() => {});
+  };
+  const handleRate = (n) => { setRating(n); if (onRate) onRate(story.id, n); };
+
+  const renderLine = (line, i) => {
+    const parts = line.split(/(\{[^}]+\})/g);
+    return (
+      <p key={i} style={{ margin: '0 0 0.9em', fontFamily: t.fontBody, fontWeight: 500, fontSize: 20, lineHeight: 1.55, color: '#fde68a', letterSpacing: -0.2 }}>
+        {parts.map((p, j) => {
+          const m = p.match(/^\{(.+)\}$/);
+          if (!m) return <span key={j}>{p}</span>;
+          return <span key={j} style={{ color: '#fbbf24', fontWeight: 800, textShadow: '0 0 24px rgba(251,191,36,0.4)' }}>{m[1]}</span>;
+        })}
+      </p>
+    );
+  };
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 100, background: '#050514', display: 'flex', flexDirection: 'column' }}>
+      {/* Hidden audio — src set imperatively */}
+      <audio
+        ref={audioRef}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); goNext(); }}
+      />
+
+      {/* ── Full-bleed image section ── */}
+      <div style={{ flex: '0 0 68vh', position: 'relative', overflow: 'hidden', background: 'radial-gradient(110% 90% at 50% -10%, #1e1b4b 0%, #050514 70%)' }}>
+        {page && page.image && (
+          <img src={page.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        )}
+        {(!page || !page.image) && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 80 }}>📖</div>
+        )}
+
+        {/* Bottom gradient */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '45%', background: 'linear-gradient(to bottom, transparent, rgba(5,5,20,0.85))' }} />
+
+        {/* Title + category (page 0 only) */}
+        {currentPage === 0 && (
+          <div style={{ position: 'absolute', bottom: 16, left: 20, right: 64, zIndex: 3 }}>
+            <div style={{ color: '#fbbf24', fontFamily: t.fontBody, fontWeight: 700, fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 }}>{story.category}</div>
+            <h1 style={{ margin: 0, fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle, fontSize: 24, lineHeight: 1.15, color: '#fef9e7', letterSpacing: -0.5 }}>{story.title}</h1>
+          </div>
+        )}
+
+        {/* Page counter */}
+        <div style={{ position: 'absolute', top: 68, left: 20, zIndex: 5, color: 'rgba(254,243,199,0.55)', fontFamily: t.fontBody, fontSize: 12, fontWeight: 600 }}>
+          {currentPage + 1} / {pages.length}
+        </div>
+
+        {/* Close button */}
+        <button onClick={onClose} style={{ position: 'absolute', top: 64, right: 20, zIndex: 5, width: 40, height: 40, borderRadius: 999, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', color: '#fef3c7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(12px)' }}>
+          <Icon name="close" size={18} stroke={2.5} />
+        </button>
+
+        {/* Lightbox expand icon */}
+        {page && page.image && (
+          <button onClick={() => setImageZoom(true)} style={{ position: 'absolute', top: 112, right: 20, zIndex: 5, width: 36, height: 36, borderRadius: 999, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', color: '#fef3c7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(12px)' }}>
+            <Icon name="eye" size={15} stroke={2} />
+          </button>
+        )}
+
+        {/* Invisible tap zones: prev | pause/play | next */}
+        <div style={{ position: 'absolute', inset: 0, zIndex: 2, display: 'flex' }}>
+          <button onClick={goPrev} style={{ flex: '0 0 33.33%', height: '100%', background: 'transparent', border: 'none', cursor: currentPage > 0 ? 'pointer' : 'default' }} />
+          <button onClick={togglePlay} style={{ flex: '0 0 33.33%', height: '100%', background: 'transparent', border: 'none', cursor: audioSrc ? 'pointer' : 'default' }} />
+          <button onClick={goNext} style={{ flex: '0 0 33.33%', height: '100%', background: 'transparent', border: 'none', cursor: isLastPage ? 'default' : 'pointer' }} />
+        </div>
+      </div>
+
+      {/* ── Text panel ── */}
+      <div style={{ flex: 1, background: 'rgba(5,5,20,0.96)', overflowY: 'auto', padding: '14px 24px 24px', display: 'flex', flexDirection: 'column' }}>
+        {/* Play/pause pill */}
+        {audioSrc && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <button onClick={togglePlay} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 999, background: playing ? `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})` : 'rgba(255,255,255,0.08)', border: `1px solid ${playing ? 'transparent' : t.glassBorder}`, color: playing ? '#1a0a3e' : t.text, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+              <Icon name={playing ? 'pause' : 'play'} size={14} stroke={2} />
+              {playing ? 'Pause' : 'Play'}
+            </button>
+          </div>
+        )}
+
+        {/* Page text */}
+        <div style={{ flex: 1 }}>
+          {page && page.text ? renderLine(page.text, 0) : null}
+        </div>
+
+        {/* Tap-to-continue hint when no audio */}
+        {tapHint && (
+          <div style={{ color: 'rgba(254,243,199,0.45)', fontFamily: t.fontBody, fontSize: 13, fontStyle: 'italic', textAlign: 'center', paddingTop: 6 }}>
+            Tap → to continue
+          </div>
+        )}
+
+        {/* Rating + delete — last page only */}
+        {isLastPage && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{ padding: '16px', textAlign: 'center', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20 }}>
+              <div style={{ color: '#fde68a', fontFamily: t.fontBody, fontWeight: 700, fontSize: 14, marginBottom: 12 }}>How was tonight's story?</div>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
+                {[1, 2, 3, 4, 5].map(n => (
+                  <button key={n} onClick={() => handleRate(n)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: n <= rating ? '#fbbf24' : 'rgba(254,243,199,0.25)', transform: n <= rating ? 'scale(1.05)' : 'scale(1)', transition: 'all .15s' }}>
+                    <Icon name="star" size={30} stroke={2} />
+                  </button>
+                ))}
+              </div>
+            </div>
+            {onDelete && (
+              <div style={{ marginTop: 14, textAlign: 'center' }}>
+                <button onClick={() => onDelete(story.id)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(248,113,113,0.55)', fontFamily: t.fontBody, fontWeight: 600, fontSize: 13, padding: '8px 16px' }}>
+                  Delete story
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Lightbox */}
+      {imageZoom && page && page.image && (
+        <div onClick={() => setImageZoom(false)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(2,6,23,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
+          <img src={page.image} alt="" style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 24, objectFit: 'contain', boxShadow: '0 24px 80px rgba(0,0,0,0.7)' }} />
+          <button onClick={(e) => { e.stopPropagation(); setImageZoom(false); }} style={{ position: 'absolute', top: 20, right: 20, width: 40, height: 40, borderRadius: 999, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fef3c7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="close" size={18} stroke={2.5} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Reader — routes to PagedReader (v2) or LegacyReader ──────
+function Reader({ t, story, onClose, onRate, onDelete }) {
+  const isPaged = story.version === 2 && Array.isArray(story.pages);
+  return isPaged
+    ? <PagedReader t={t} story={story} onClose={onClose} onRate={onRate} onDelete={onDelete} />
+    : <LegacyReader t={t} story={story} onClose={onClose} onRate={onRate} onDelete={onDelete} />;
 }
 
 // ─── Toast notifications ──────────────────────────────────────
