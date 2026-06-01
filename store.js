@@ -26,7 +26,11 @@ function dbOpen() {
         db.createObjectStore('audio', { keyPath: 'id' });
       }
     };
-    req.onsuccess = (e) => { _db = e.target.result; resolve(_db); };
+    req.onsuccess = (e) => {
+      _db = e.target.result;
+      resolve(_db);
+      if (!localStorage.getItem('sw_v2_migrated')) _runLegacyWipe(_db).catch(() => {});
+    };
     req.onerror  = ()  => reject(req.error);
   });
 }
@@ -81,6 +85,56 @@ function audioDelete(id) {
     req.onsuccess = () => resolve();
     req.onerror   = ()  => reject(req.error);
   }));
+}
+
+function audioGetPage(storyId, idx) {
+  return audioGet(`${storyId}::${idx}`);
+}
+function audioPutPage(storyId, idx, dataUrl) {
+  return audioPut(`${storyId}::${idx}`, dataUrl);
+}
+function audioDeleteStory(storyId) {
+  return dbOpen().then(db => new Promise((resolve, reject) => {
+    const prefix = storyId + '::';
+    const req = db.transaction('audio', 'readonly').objectStore('audio').getAllKeys();
+    req.onsuccess = () => {
+      const keys = (req.result || []).filter(k => typeof k === 'string' && k.startsWith(prefix));
+      if (!keys.length) { resolve(); return; }
+      const tx = db.transaction('audio', 'readwrite');
+      const store = tx.objectStore('audio');
+      keys.forEach(k => store.delete(k));
+      tx.oncomplete = () => resolve();
+      tx.onerror    = ()  => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  }));
+}
+
+// One-time wipe of legacy AI stories (type='story', version!==2) and their audio.
+// Runs async after dbOpen resolves — does not block callers.
+async function _runLegacyWipe(db) {
+  try {
+    const allItems = await new Promise((resolve, reject) => {
+      const r = db.transaction('items', 'readonly').objectStore('items').getAll();
+      r.onsuccess = () => resolve(r.result || []);
+      r.onerror   = () => reject(r.error);
+    });
+    const legacyIds = allItems
+      .filter(i => i.type === 'story' && i.version !== 2)
+      .map(i => i.id);
+    if (!legacyIds.length) { localStorage.setItem('sw_v2_migrated', '1'); return; }
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(['items', 'audio'], 'readwrite');
+      const items = tx.objectStore('items');
+      const audio = tx.objectStore('audio');
+      legacyIds.forEach(id => { items.delete(id); audio.delete(id); });
+      tx.oncomplete = () => resolve();
+      tx.onerror    = () => reject(tx.error);
+    });
+    localStorage.setItem('sw_v2_migrated', '1');
+  } catch (e) {
+    console.warn('Legacy wipe failed:', e);
+  }
 }
 
 // ─── API key helpers ──────────────────────────────────────────
@@ -521,15 +575,6 @@ async function callImageApi(prompt, signal, onRetry) {
   return null;
 }
 
-async function imageCall(form, signal, onRetry) {
-  const toneWord = typeof form.tone === 'string' ? (form.tone.trim() || 'Gentle') : (TONE_WORDS[form.tone - 1] || 'Gentle');
-  const prompt =
-    `Create a soft, dreamy children's picture-book cover illustration. ` +
-    `Scene: ${form.context}. Mood: ${toneWord}. ` +
-    `Portrait orientation, no text or lettering in the image.`;
-  return callImageApi(prompt, signal, onRetry);
-}
-
 // Generate a cover image for a manually-linked storybook.
 async function generateLinkCover(description, signal) {
   const prompt =
@@ -539,18 +584,14 @@ async function generateLinkCover(description, signal) {
   return callImageApi(prompt, signal);
 }
 
-// ─── TTS audio generation ─────────────────────────────────────
+// ─── TTS audio generation (per page) ─────────────────────────
+// Takes a plain narration string (audioPrompt from a page object).
 // Returns a WAV data URL, or null if unavailable / aborted.
-async function generateAudio(story, signal) {
+async function generateAudioForPage(text, signal) {
   if (signal?.aborted) return null;
 
-  const bodyText = (story.body || [])
-    .map(p => p.replace(/\{([^}]+)\}/g, '$1'))
-    .join('\n\n');
-  const narrationText = `${story.title}\n\n${bodyText}`;
-
   const ctrl    = new AbortController();
-  const timerId = setTimeout(() => ctrl.abort(), 120000);
+  const timerId = setTimeout(() => ctrl.abort(), 60000);
   if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
 
   const ttsPrompt = getAudioSystemPrompt() || getDefaultAudioSystemPrompt();
@@ -565,7 +606,7 @@ async function generateAudio(story, signal) {
         body: JSON.stringify({
           contents: [{
             role: 'user',
-            parts: [{ text: `${ttsPrompt}\n\n${narrationText}` }],
+            parts: [{ text: `${ttsPrompt}\n\n${text}` }],
           }],
           generationConfig: {
             responseModalities: ['audio'],
@@ -598,14 +639,12 @@ async function generateAudio(story, signal) {
 
     if (!pcmParts.length) return null;
 
-    // Decode each chunk from base64 and concatenate as raw PCM bytes
     const decoded = pcmParts.map(b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
     const totalLen = decoded.reduce((n, a) => n + a.length, 0);
     const combined = new Uint8Array(totalLen);
     let off = 0;
     for (const arr of decoded) { combined.set(arr, off); off += arr.length; }
 
-    // Wrap PCM in a WAV container (24 kHz, mono, 16-bit)
     const wavBuf    = pcmToWav(combined, 24000, 1, 16);
     const wavBase64 = uint8ArrayToBase64(new Uint8Array(wavBuf));
     return `data:audio/wav;base64,${wavBase64}`;
@@ -619,30 +658,53 @@ async function generateAudio(story, signal) {
 
 // ─── Main weave entry point ───────────────────────────────────
 // onProgress(phase, data):
-//   'text'         / null   — text + image both starting (parallel)
-//   'imageRetry'   / reason — image retry fallback
-//   'imagePending' / story  — text done, image still running, audio now started
-// Returns { ...story, audioPromise, audioReady: false } — caller awaits audioPromise separately.
+//   'text'         / null                    — text call starting
+//   'assets'       / { story, total }         — text done, page assets fanning out
+//   'pageAsset'    / { idx, kind, ok }        — one image or audio settled
+//   'imageRetry'   / { idx, reason }          — per-page image retry
+// Returns { story, assetsPromise } where story has images inlined on pages[]
+// and assetsPromise resolves to per-page audio array when all audio settles.
 async function weaveStory(form, existingIds, signal, onProgress) {
   onProgress?.('text', null);
 
-  // Start image immediately — runs in parallel with text
-  const imageOnRetry = (reason) => onProgress?.('imageRetry', reason);
-  const imagePromise = imageCall(form, signal, imageOnRetry).catch(() => null);
+  const textStory = await textCall(form, existingIds, signal);
+  const pages     = textStory.pages || [];
+  onProgress?.('assets', { story: textStory, total: pages.length });
 
-  // Await text — audio generation needs the story content
-  const story = await textCall(form, existingIds, signal);
+  // Fan out — one image + one audio per page, all start simultaneously
+  const imagePromises = pages.map((p, idx) =>
+    callImageApi(p.imagePrompt, signal, (reason) => onProgress?.('imageRetry', { idx, reason }))
+      .catch(() => null)
+      .then(img => { onProgress?.('pageAsset', { idx, kind: 'image', ok: !!img }); return img; })
+  );
 
-  // Start audio right after text completes (does not wait for image)
-  const audioPromise = generateAudio(story, signal).catch(() => null);
-  onProgress?.('imagePending', story);
+  const audioPromises = pages.map((p, idx) =>
+    generateAudioForPage(p.audioPrompt, signal)
+      .catch(() => null)
+      .then(aud => { onProgress?.('pageAsset', { idx, kind: 'audio', ok: !!aud }); return aud; })
+  );
 
-  // Wait for image
-  const image = await imagePromise;
-  const storyWithImage = { ...story, type: 'story', coverImage: image, createdAt: Date.now() };
+  // Wait for all images to settle, then inline into pages
+  const imageResults  = await Promise.allSettled(imagePromises);
+  const pagesWithImgs = pages.map((p, idx) => ({
+    ...p,
+    image: imageResults[idx].status === 'fulfilled' ? imageResults[idx].value : null,
+  }));
 
-  // Return immediately with audioPromise — caller handles background audio
-  return { ...storyWithImage, audioPromise, audioReady: false };
+  const story = {
+    ...textStory,
+    type:       'story',
+    version:    2,
+    pages:      pagesWithImgs,
+    coverImage: pagesWithImgs[0]?.image || null,
+    createdAt:  Date.now(),
+    audioReady: false,
+  };
+
+  // assetsPromise resolves once all per-page audio has settled
+  const assetsPromise = Promise.all(audioPromises);
+
+  return { story, assetsPromise };
 }
 
 // ─── Google Drive integration ─────────────────────────────────
@@ -914,7 +976,7 @@ async function drivePullSync() {
 // ─── Export ───────────────────────────────────────────────────
 window.SW = {
   dbOpen, itemsAll, itemPut, itemDelete,
-  audioGet, audioPut, audioDelete,
+  audioGet, audioPut, audioDelete, audioGetPage, audioPutPage, audioDeleteStory,
   getApiKey, setApiKey, hasApiKey, validateApiKey,
   getTextModel, setTextModel, getImageModel, setImageModel, getAudioModel, setAudioModel,
   getAudioVoice, setAudioVoice, getAudioSystemPrompt, setAudioSystemPrompt, getDefaultAudioSystemPrompt,
@@ -924,7 +986,7 @@ window.SW = {
   getChildName, setChildName, getChildBirthday, setChildBirthday,
   getSampleImage, setSampleImage, clearSampleImage, compressImageForStorage,
   mergeItems, uniqueId, slugify,
-  weaveStory, generateAudio, generateLinkCover,
+  weaveStory, generateLinkCover,
   drive: {
     isConnected:   driveIsConnected,
     getEmail:      driveGetEmail,
