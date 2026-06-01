@@ -157,7 +157,19 @@ function setAudioSystemPrompt(s) {
   else   localStorage.removeItem('sw_audio_sys_prompt');
 }
 function getDefaultAudioSystemPrompt() {
-  return "Read the following transcript based on the audio profile and director's note.\n\n# Audio Profile\nA deep, resonant narrator of mysteries.\n\n# Director's note\nStyle: Warm, understanding, soft tone with gentle inflections. Pace: Slow, liquid, zero urgency. Long pauses for breath. Accent: British (RP).\n\n## Scene:\nA quiet children bedroom, low light, with an attentive 4 year old listening to every word\n\n## Sample Context:\nRead this children's bedtime story in a warm, gentle narrator's voice. Speak softly and slowly with natural pauses between sentences, as if reading to a young child at bedtime\n\n## Transcript:";
+  return [
+    `Read the following transcript based on the performance and scene context.`,
+    ``,
+    `### SCENE`,
+    `A quiet children's bedroom, low light, with an attentive 4-year-old listening to every word.`,
+    ``,
+    `### PERFORMANCE`,
+    `Role: A parent reading a bedtime story.`,
+    `Style: Warm, understanding, and patient with gentle inflections. Speak unhurriedly with natural pauses to let the magic of the story settle.`,
+    `Accent: British (RP) from a member of the Royal family, having lived in London all their life.`,
+    ``,
+    `#### TRANSCRIPT`
+  ].join('\n');
 }
 
 // ─── Custom system prompt helpers ─────────────────────────────
@@ -362,7 +374,7 @@ function guessScene(context) {
 }
 
 // ─── Gemini API calls ─────────────────────────────────────────
-function buildSystemPrompt(form, childName, targetPages) {
+function buildSystemPrompt(form, childName, childAppearance, targetPages) {
   const toneWord = typeof form.tone === 'string'
     ? (form.tone.trim() || 'Gentle')
     : (TONE_WORDS[(form.tone || 3) - 1] || 'Gentle');
@@ -371,10 +383,11 @@ function buildSystemPrompt(form, childName, targetPages) {
     ? `Companion: ${childName} meets ${form.character.trim()}. The meeting is warm and joyful. No other characters.`
     : `Companion: Exactly one friendly animal or magical creature. No other characters.`;
 
+  // Consolidated style rules to avoid Dr. Seuss vs. Julia Donaldson collisions
   const sentenceRules = form.storyStyle === 'rhyme'
     ? [
-        `Structure: Write in AABB rhyming couplets.`,
-        `Rhythm: Keep the cadence gentle, rhythmic, and highly readable. Avoid forced or overly complex rhymes.`,
+        `Structure: Write in rhythmic, rhyming verse (AABB couplets).`,
+        `Style: Emulate Julia Donaldson — use a predictable, suspenseful pace with a rhythmic, rhyming verse that uses a repetitive, cumulative structure that is highly engaging for children.`,
         `Language: Use simple, comforting vocabulary suitable for a 4-year-old. Every rhyme must be a true rhyme.`
       ].join(' ')
     : `Structure: Use short, clear sentences. Vary the rhythm so it sounds natural and conversational when read aloud. Use present tense.`;
@@ -396,8 +409,6 @@ function buildSystemPrompt(form, childName, targetPages) {
     ];
   }
 
-  const audioTagList = '[whispers], [softly], [gently], [laughs], [gasps], [sighs], [pauses], [wonders]';
-
   return [
     `You are an expert children's author writing warm, comforting bedtime stories. Return ONLY valid JSON matching the exact schema requested.`,
     ``,
@@ -406,7 +417,7 @@ function buildSystemPrompt(form, childName, targetPages) {
     companionLine,
     `Tone: ${toneWord} — permeate every sentence with this feeling.`,
     `Atmosphere: Weave in gentle sensory details (soft hums, textures, gentle glows). Focus on comfort and wonder.`,
-    `Restricted: NEVER use "suddenly", "unfortunately", "however", "scary", or "dark". No narrative clichés.`,
+    `Localization: Use strict British English spelling and terminology (e.g., pyjamas, garden, colour, mum).`,
     ``,
     `[STYLE & FORMATTING]`,
     sentenceRules,
@@ -416,9 +427,9 @@ function buildSystemPrompt(form, childName, targetPages) {
     ...narrativeArc,
     ``,
     `[PAGE FIELDS — required for every page object]`,
-    `text: On-screen prose for this page. ≤ ~35 words. Designed to be heard while a single illustration is shown. Vocab braces apply here only.`,
-    `imagePrompt: Dense, concrete scene description for the image model. Include: setting, characters (describe ${childName} as "a young girl with [hair colour]"), their action, lighting, mood, and art style (soft watercolour children's book illustration). No text or lettering in the image. ~40–60 words.`,
-    `audioPrompt: Narration text for TTS. Same words as "text" but with all {vocab} braces removed (plain words). Add 1–2 inline audio tags for pacing chosen from: ${audioTagList}. Page 1's audioPrompt should be punchier — it doubles as a hook. Never more than 2 tags per page.`,
+    `text: On-screen prose for this page. ≤ ~35 words. Designed to be heard out loud while a single illustration is shown. Vocab braces apply here only.`,
+    `imagePrompt: Dense, concrete scene description for the image model. Include: setting, characters (describe ${childName} as "${childAppearance}"), their action, lighting, mood, and art style (soft watercolour children's book illustration). Ensure the companion's visual description remains identical on every page. No text or lettering in the image. ~40–60 words.`,
+    `audioPrompt: Narration text for the TTS Model. The spoken words MUST be 100% identical to the "text" field so the audio perfectly matches the screen. 1) Remove all {vocab} braces. 2) Inject inline audio tag modifiers ([tag]) to control delivery. Be creative with tags to make it engaging, like a real parent reading to their child. Example: "[very happy] Sophie skips into her bedroom, [amazed] still wearing her shiny crown! [laughs]"`,
     ``,
     `[JSON SCHEMA OUTPUT]`,
     `scene ∈ {moon,fox,unicorn,whale,dragon,bear,cloud,turtle}`,
@@ -610,7 +621,7 @@ async function generateAudioForPage(text, signal) {
           }],
           generationConfig: {
             responseModalities: ['audio'],
-            temperature: 1,
+            temperature: 0.5,
             speech_config: {
               voice_config: {
                 prebuilt_voice_config: { voice_name: getAudioVoice() },
