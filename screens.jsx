@@ -1084,7 +1084,7 @@ function Reader({ t, story, onClose, onRate, onDelete }) {
 
         {/* Body */}
         <div style={{ maxWidth: 360 }}>
-          {story.body.map(renderLine)}
+          {(story.body || []).map(renderLine)}
         </div>
 
         {/* Rating */}

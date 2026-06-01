@@ -89,14 +89,13 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 ```js
 {
   id, title, category, rating, palette, scene, vocab,
-  type:      'story',
-  version:   2,                // v2 marker — anything without this is a legacy story
-  pages:     [Page, ...],      // 4–14 entries (MIN_PAGES / MAX_PAGES constants in store.js)
-  coverImage: 'data:image/webp;base64,...',  // still generated separately; null if failed
-  coverDriveId: 'abc123XYZ',  // Google Drive file ID (optional)
-  audioReady: false,           // true once whole-story audio WAV is stored (legacy path; per-page audio is M2)
-  audioDriveId: 'abc123XYZ',  // Google Drive file ID for audio (optional)
-  createdAt:  1234567890,      // Date.now() timestamp
+  type:       'story',
+  version:    2,                // v2 marker — anything without this is a legacy story
+  pages:      [Page, ...],      // 4–14 entries (MIN_PAGES / MAX_PAGES constants in store.js)
+  coverImage: 'data:image/webp;base64,...',  // = pages[0].image for library tile; null if all images failed
+  coverDriveId: 'abc123XYZ',   // Google Drive file ID for page-1 cover (optional)
+  audioReady: false,            // true once ALL per-page audio has settled in the audio IDB store
+  createdAt:  1234567890,       // Date.now() timestamp
 }
 ```
 
@@ -107,13 +106,15 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
   text:        "On-screen prose (≤ ~35 words, may contain {vocab} braces)",
   imagePrompt: "Dense scene description for image model (~40–60 words, no text/lettering)",
   audioPrompt: "Narration text (plain words, no braces) with 1–2 inline audio tags like [whispers]",
-  // image and audio fields added in M2 (per-page asset generation — not yet implemented)
+  image:       'data:image/webp;base64,...' | null,  // inlined at weave time; null if image failed
 }
 ```
 
-Audio data (WAV) is stored in a **separate IndexedDB object store** (`audio`, key `id`), not in the story object itself. `audioReady: true` on the story signals that audio is available locally.
+Per-page audio is stored in the **`audio` IndexedDB store** keyed as `${storyId}::${pageIdx}` (e.g. `my-story::0`, `my-story::1`). The legacy single-story audio key (bare `storyId`) is still used by `audioGet/audioPut/audioDelete`; per-page callers use `audioGetPage/audioPutPage/audioDeleteStory`. `audioReady: true` on the story signals all pages' audio has settled.
 
-**Legacy AI stories** (no `version` field, had `body: string[]`) will be wiped by a one-time migration in M2. Until then they render via the existing Reader unchanged.
+**Known limitation (out of scope until a future milestone):** per-page images and audio are not backed up to Google Drive individually. Only `pages[0].image` is uploaded as the story "cover" (`coverDriveId`).
+
+**Legacy AI stories** (no `version` field, had `body: string[]`) are wiped on first load via a one-time migration (`sw_v2_migrated` localStorage flag). Seeds are unaffected.
 
 **Link items** (manually added) have:
 
@@ -140,9 +141,12 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `itemsAll()` | Load all user-created items from IndexedDB, sorted newest-first |
 | `itemPut(item)` | Upsert an item into IndexedDB |
 | `itemDelete(id)` | Delete an item from IndexedDB |
-| `audioGet(id)` | Load a WAV data URL from the `audio` IDB store by story ID (returns null if absent) |
-| `audioPut(id, dataUrl)` | Upsert a WAV data URL into the `audio` IDB store |
-| `audioDelete(id)` | Delete audio from the `audio` IDB store |
+| `audioGet(id)` | Load a WAV data URL from the `audio` IDB store by raw key (returns null if absent) |
+| `audioPut(id, dataUrl)` | Upsert a WAV data URL into the `audio` IDB store by raw key |
+| `audioDelete(id)` | Delete one audio entry by raw key |
+| `audioGetPage(storyId, idx)` | Load per-page WAV — delegates to `audioGet('${storyId}::${idx}')` |
+| `audioPutPage(storyId, idx, dataUrl)` | Store per-page WAV — key `${storyId}::${idx}` |
+| `audioDeleteStory(storyId)` | Delete all `${storyId}::*` audio keys for a story (used on delete) |
 | `mergeItems(persisted)` | Merge IndexedDB items with seeds (respects deleted seeds) |
 | `getApiKey() / setApiKey(k) / hasApiKey() / validateApiKey(k)` | Gemini API key via localStorage |
 | `getTextModel() / setTextModel(m)` | Text generation model (default `gemini-3.5-flash`) via localStorage `sw_text_model` |
@@ -162,8 +166,8 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `getSeedDeletions()` | Return array of deleted seed IDs |
 | `uniqueId(base, existingIds)` | Generate a unique kebab-case ID |
 | `slugify(title)` | Convert title to kebab-case |
-| `weaveStory(form, existingIds, signal, onProgress)` | Parallel AI story generation: text + image run simultaneously; audio starts as soon as text finishes. Returns `{ ...story, audioPromise, audioReady: false }` — caller awaits `audioPromise` in the background after navigating to the story. |
-| `generateAudio(story, signal)` | Calls Gemini TTS (`gemini-3.1-flash-tts-preview`, voice Aoede) to narrate a story; returns a WAV data URL or null |
+| `weaveStory(form, existingIds, signal, onProgress)` | Fans out per-page image + audio generation in parallel after text resolves. Returns `{ story, assetsPromise }` — `story` has `pages[]` with images inlined and `coverImage = pages[0].image`; `assetsPromise` resolves to `audioResults[]` when all page audio settles. Emits phases: `'text'`, `'assets'`, `'pageAsset'`, `'imageRetry'`. |
+| `generateAudioForPage(text, signal)` | Calls Gemini TTS for a single page's `audioPrompt` string; 60 s timeout; returns a WAV data URL or null. |
 | `generateLinkCover(description, signal)` | Generate a cover image for a linked storybook; `description` is a free-text prompt about the book; returns a WebP data URL or throws |
 | `drive.isConnected()` | Returns true if a Drive account email is stored in localStorage |
 | `drive.getEmail()` | Returns the connected Google account email (or `''`) |
@@ -207,32 +211,34 @@ const DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image";
 
 ### Image API helper (`callImageApi`)
 
-`imageCall` (story covers) and `generateLinkCover` (link covers) both delegate to a private `callImageApi(prompt, signal)` in `store.js`. It:
+`callImageApi(prompt, signal, onRetry)` in `store.js` handles all image generation. It:
 
 - Resolves the reference image: Settings upload (`getSampleImage()`) takes priority; falls back to Sophie's hardcoded photo (`window.SOPHIE_IMAGE`); then none
 - Applies a 45-second hard timeout via a nested `AbortController`
-- POSTs to `getImageModel()` with the no-`generationConfig` format (see critical note below)
+- POSTs to `getImageModel()` with `generationConfig: { responseModalities: ['TEXT', 'IMAGE'] }`
 - Returns a compressed WebP data URL via `compressToWebp`
 
 Do not inline this logic into callers; add new image call sites by calling `callImageApi` instead.
 
 ### Story Generation Flow (`weaveStory`)
 
-Generation is **parallel** — text and image run simultaneously; audio starts as soon as text is done:
+Generation fans out per-page in parallel after text resolves:
 
-1. **`onProgress('text', null)`** — signals both text and image are starting (shown as parallel spinners in Weaving screen)
-2. **`textCall` + `imageCall` in parallel** — text and image fire simultaneously. `imageCall` delegates to `callImageApi` (3-attempt retry with sanitized prompts). `onProgress('imageRetry', reason)` is emitted on each fallback.
-3. **`textCall` resolves** → `generateAudio(story, signal)` starts immediately (does not wait for image). Audio runs in background.
-4. **`onProgress('imagePending', story)`** — text done, image still running, audio running. UI stores `story` so user can skip at any time.
-5. **`imageCall` resolves** → `weaveStory` returns `{ ...story, type: 'story', coverImage, createdAt, audioPromise, audioReady: false }`.
-6. **`onWeave` in `app.jsx`** saves the story (without audio), navigates to reader immediately, then awaits `audioPromise` in the background. When audio resolves, `audioPut` + `itemPut` update `audioReady: true` and the listener button appears.
+1. **`onProgress('text', null)`** — text call starting (spinner shown)
+2. **`textCall` resolves** → `onProgress('assets', { story, total: N })` — N image + N audio calls start simultaneously
+3. **Per-page fan-out** — for each page `idx`:
+   - `callImageApi(page.imagePrompt, signal, reason => onProgress('imageRetry', { idx, reason }))`
+   - `generateAudioForPage(page.audioPrompt, signal)` (60 s timeout)
+   - Both emit `onProgress('pageAsset', { idx, kind: 'image'|'audio', ok })` on settle
+4. **`Promise.allSettled(imagePromises)` resolves** → images inlined into `pages[].image`; `coverImage = pages[0].image`
+5. **`weaveStory` returns** `{ story, assetsPromise }` — story is fully formed with images; audio is still in flight
+6. **`onWeave` in `app.jsx`** saves the story, navigates immediately, then awaits `assetsPromise`. When it resolves, each page's audio is written via `audioPutPage(id, idx, wav)` and `audioReady: true` is set on the story.
 
 `onProgress` phase keys:
-- `'text'` / null — both text + image starting
-- `'imageRetry'` / reason — image retry fallback
-- `'imagePending'` / story — text done, audio started, image still running
-
-`onWeave` in `app.jsx` extracts `audioData` from the result, calls `audioPut(id, audioData)` to store it in the `audio` IDB store, then saves the story (without `audioData`) via `itemPut`.
+- `'text'` / null — text call starting
+- `'assets'` / `{ story, total }` — text done, assets fanning out (`app.jsx` maps to `'imagePending'` UI state)
+- `'pageAsset'` / `{ idx, kind, ok }` — one image or audio settled (M4 will render per-page progress)
+- `'imageRetry'` / `{ idx, reason }` — per-page image retry fallback
 
 ### Image Safety & Retry Logic
 
@@ -241,7 +247,7 @@ Generation is **parallel** — text and image run simultaneously; audio starts a
 - **Attempt 2** (30 s): `sanitizeImagePrompt(prompt)` + reference image — strips "featuring [name]", "Feature the child [name] prominently", replaces "child" with "illustrated character"
 - **Attempt 3** (30 s): sanitized prompt, no reference image
 
-Each fallback emits `onProgress('imageRetry', reason)` (`'adjusting_prompt'` or `'no_reference'`), which `app.jsx` maps to a human-readable sub-message shown in the Weaving screen.
+Each fallback emits `onProgress('imageRetry', { idx, reason })` (`'adjusting_prompt'` or `'no_reference'`), which `app.jsx` maps to a human-readable sub-message shown in the Weaving screen.
 
 **`PROHIBITED_CONTENT` handling:** If any attempt returns `finishReason: "PROHIBITED_CONTENT"`, `callImageApi` throws immediately with a user-visible message — no further retries. For `weaveStory`, the `imageCall(...).catch(() => null)` wrapper absorbs this and the story saves without a cover. For `generateLinkCover` (called from `AddLinkModal`), the error propagates to the UI, which displays it to the user. If all retries fail for other reasons, `callImageApi` returns `null` — callers must check for null and show an error.
 
