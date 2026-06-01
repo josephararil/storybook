@@ -1610,6 +1610,73 @@ function Weaving({ t, error, phase, onCancel, onReadReady, weavingProgress }) {
 }
 
 // ─── ApiKeyModal (AI Configuration) ──────────────────────────
+// ─── Welcome modal (first-time onboarding) ───────────────────
+function WelcomeModal({ t, onClose, onSetupGemini, onConnectDrive }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 250,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(2, 6, 23, 0.85)',
+      backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)',
+      padding: 24,
+    }}>
+      <div style={{
+        width: '100%', maxWidth: 340,
+        background: 'linear-gradient(160deg, rgba(30,27,75,0.98) 0%, rgba(15,11,41,0.98) 100%)',
+        borderRadius: 24,
+        border: `1px solid ${t.glassBorder}`,
+        boxShadow: '0 32px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.08)',
+        padding: '32px 28px 24px',
+        display: 'flex', flexDirection: 'column', gap: 20,
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 44, marginBottom: 12, lineHeight: 1 }}>✨</div>
+          <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 22, color: t.text, marginBottom: 10 }}>
+            Welcome to StoryWeaver
+          </div>
+          <div style={{ fontFamily: t.fontBody, fontSize: 14, color: t.textMuted, lineHeight: 1.65 }}>
+            Turn any day into a personalised bedtime story — with AI illustrations and narration made just for your child.
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button onClick={onSetupGemini} style={{
+            width: '100%', border: 'none', cursor: 'pointer',
+            padding: '14px 20px', borderRadius: 14,
+            background: `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})`,
+            color: '#1a0a3e',
+            fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 15,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}>
+            <Icon name="wand" size={18} stroke={2.2} />
+            Link Gemini API key
+          </button>
+          <button onClick={onConnectDrive} style={{
+            width: '100%', cursor: 'pointer',
+            padding: '14px 20px', borderRadius: 14,
+            background: t.accentSoft,
+            color: t.accent,
+            fontFamily: t.fontHead, fontWeight: t.headWeight, fontSize: 15,
+            border: `1px solid ${t.accent}33`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          }}>
+            <Icon name="cloud-up" size={18} stroke={2.2} />
+            Connect Google Drive
+          </button>
+        </div>
+
+        <button onClick={onClose} style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: t.textMuted, fontFamily: t.fontBody, fontSize: 13,
+          padding: 0, textAlign: 'center',
+        }}>
+          Skip for now
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ApiKeyModal({ t, open, onClose }) {
   const [keyValue,    setKeyValue]    = useState(() => window.SW.getApiKey());
   const [checking,    setChecking]    = useState(false);
@@ -2175,4 +2242,4 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
   );
 }
 
-Object.assign(window, { Library, Creator, Settings, Reader, Weaving, BottomNav, ApiKeyModal, AddLinkModal, Toast });
+Object.assign(window, { Library, Creator, Settings, Reader, Weaving, BottomNav, ApiKeyModal, AddLinkModal, Toast, WelcomeModal });
