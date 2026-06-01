@@ -87,11 +87,10 @@ function StoryWeaverApp() {
   const [keyModalOpen,  setKeyModalOpen]  = React.useState(false);
   const [addLinkOpen,   setAddLinkOpen]   = React.useState(false);
   const [editingLink,   setEditingLink]   = React.useState(null);
-  const [weaveError,    setWeaveError]    = React.useState(null);
-  const [weavePhase,    setWeavePhase]    = React.useState(null);
-  const [weavingStory,  setWeavingStory]  = React.useState(null);
-  const [weavingSubMsg, setWeavingSubMsg] = React.useState(null);
-  const [toasts,        setToasts]        = React.useState([]);
+  const [weaveError,      setWeaveError]      = React.useState(null);
+  const [weavePhase,      setWeavePhase]      = React.useState(null);
+  const [weavingProgress, setWeavingProgress] = React.useState({ total: 0, images: new Set(), audios: new Set(), retries: {} });
+  const [toasts,          setToasts]          = React.useState([]);
   const abortRef         = React.useRef(null);
   const ignoreWeaveRef   = React.useRef(false);
 
@@ -132,7 +131,7 @@ function StoryWeaverApp() {
     ignoreWeaveRef.current = false;
     setWeaveError(null);
     setWeavePhase(null);
-    setWeavingStory(null);
+    setWeavingProgress({ total: 0, images: new Set(), audios: new Set(), retries: {} });
     navigate('/weaving');
 
     const controller = new AbortController();
@@ -143,21 +142,35 @@ function StoryWeaverApp() {
         form, items.map(i => i.id), controller.signal,
         (phase, data) => {
           if (ignoreWeaveRef.current) return;
-          if (phase === 'pageAsset') return; // M4 will render per-page progress
+          if (phase === 'pageAsset') {
+            const { idx, kind, ok } = data;
+            setWeavingProgress(prev => {
+              const next = { ...prev };
+              if (kind === 'image') {
+                if (ok) next.images = new Set([...prev.images, idx]);
+                const newRetries = { ...prev.retries };
+                delete newRetries[idx];
+                next.retries = newRetries;
+              } else if (kind === 'audio' && ok) {
+                next.audios = new Set([...prev.audios, idx]);
+              }
+              return next;
+            });
+            return;
+          }
           if (phase === 'imageRetry') {
-            const msgs = { adjusting_prompt: 'Adjusting prompt…', no_reference: 'Trying without reference photo…' };
-            setWeavingSubMsg(msgs[data?.reason] || 'Retrying…');
+            const { idx, reason } = data || {};
+            if (idx != null) {
+              setWeavingProgress(prev => ({ ...prev, retries: { ...prev.retries, [idx]: reason } }));
+            }
             return;
           }
           if (phase === 'assets') {
-            // text done, images + audio fanning out — map to existing 'imagePending' UI state
             setWeavePhase('imagePending');
-            setWeavingSubMsg(null);
-            if (data?.story) setWeavingStory(data.story);
+            setWeavingProgress(prev => ({ ...prev, total: data?.total || 0 }));
             return;
           }
           setWeavePhase(phase);
-          setWeavingSubMsg(null);
         }
       );
       if (ignoreWeaveRef.current) return;
@@ -215,30 +228,14 @@ function StoryWeaverApp() {
     ignoreWeaveRef.current = true;
     if (abortRef.current) abortRef.current.abort();
     setWeavePhase(null);
-    setWeavingStory(null);
     setWeaveError(null);
+    setWeavingProgress({ total: 0, images: new Set(), audios: new Set(), retries: {} });
     navigate('/create');
   };
 
-  const onSkipImage = async () => {
-    const partial = weavingStory;
-    if (!partial) return;
-    ignoreWeaveRef.current = true;
+  const onReadReady = () => {
     if (abortRef.current) abortRef.current.abort();
-    const story = {
-      ...partial,
-      type:       'story',
-      version:    2,
-      createdAt:  Date.now(),
-      pages:      (partial.pages || []).map(p => ({ ...p, image: null })),
-      coverImage: null,
-      audioReady: false,
-    };
-    await window.SW.itemPut(story);
-    setItems(prev => [story, ...prev]);
-    setWeavingStory(null);
-    setWeavePhase(null);
-    navigate('/story/' + story.id);
+    // Don't set ignoreWeaveRef — let onWeave complete normally and save with whatever images resolved
   };
 
   const onSaveLink = async (data, editingId) => {
@@ -362,7 +359,7 @@ function StoryWeaverApp() {
       {openStory && (
         <Reader t={theme} story={openStory} onClose={() => navigate('/')} onRate={onRate} onDelete={onDelete} />
       )}
-      {isWeaving && <Weaving t={theme} error={weaveError} phase={weavePhase} onCancel={onCancelWeave} onSkipImage={weavingStory ? onSkipImage : null} subMessage={weavingSubMsg} />}
+      {isWeaving && <Weaving t={theme} error={weaveError} phase={weavePhase} onCancel={onCancelWeave} onReadReady={weavingProgress.images.has(0) ? onReadReady : null} weavingProgress={weavingProgress} />}
 
       {keyModalOpen && (
         <ApiKeyModal t={theme} open={keyModalOpen} onClose={() => setKeyModalOpen(false)} />
