@@ -473,7 +473,7 @@ function getDefaultSystemPrompt() {
 
 async function textCall(form, existingIds, signal) {
   const _t0  = Date.now();
-  const _tid = window.SW_TRACKER?.start({ kind: 'text', model: getTextModel(), context: (form.context || '').slice(0, 80) });
+  const _tid = window.SW_TRACKER?.start({ kind: 'text', model: getTextModel(), context: form.context || '' });
   try {
     const toneWord    = typeof form.tone === 'string' ? (form.tone.trim() || 'Gentle') : (TONE_WORDS[form.tone - 1] || 'Gentle');
     const childName   = getChildName();
@@ -611,7 +611,7 @@ async function callImageApi(prompt, signal, onRetry) {
   // Attempt 1: original prompt + reference image (45 s)
   {
     const _t0  = Date.now();
-    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: `[a1] ${prompt.slice(0, 60)}` });
+    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: `[a1] ${prompt}` });
     try {
       const r = await callImageApiOnce(prompt, signal, true, 45000);
       window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
@@ -628,7 +628,7 @@ async function callImageApi(prompt, signal, onRetry) {
   onRetry?.('adjusting_prompt');
   {
     const _t0  = Date.now();
-    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: `[a2] ${safePrompt.slice(0, 60)}` });
+    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: `[a2] ${safePrompt}` });
     try {
       const r = await callImageApiOnce(safePrompt, signal, true, 30000);
       window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
@@ -644,7 +644,7 @@ async function callImageApi(prompt, signal, onRetry) {
   onRetry?.('no_reference');
   {
     const _t0  = Date.now();
-    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: `[a3] ${safePrompt.slice(0, 60)}` });
+    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: `[a3] ${safePrompt}` });
     try {
       const r = await callImageApiOnce(safePrompt, signal, false, 30000);
       window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
@@ -673,7 +673,7 @@ async function generateAudioForPage(text, signal) {
   if (signal?.aborted) return null;
 
   const _t0  = Date.now();
-  const _tid = window.SW_TRACKER?.start({ kind: 'audio', model: getAudioModel(), context: text.slice(0, 80) });
+  const _tid = window.SW_TRACKER?.start({ kind: 'audio', model: getAudioModel(), context: text });
 
   const ctrl    = new AbortController();
   const timerId = setTimeout(() => ctrl.abort(), 60000);
@@ -1049,7 +1049,16 @@ async function drivePushSync() {
     if (!DRIVE_SYNC_EXCLUDED.has(key)) lsData[key] = localStorage.getItem(key);
   }
   const idbItems = await itemsAll();
-  const payload  = JSON.stringify({ version: 1, localStorage: lsData, indexedDB: idbItems });
+
+  // Include all per-page audio entries so a full restore is possible on a new device.
+  const db = await dbOpen();
+  const audioEntries = await new Promise((resolve, reject) => {
+    const req = db.transaction('audio', 'readonly').objectStore('audio').getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => reject(req.error);
+  });
+
+  const payload  = JSON.stringify({ version: 2, localStorage: lsData, indexedDB: idbItems, audio: audioEntries });
   const token    = await _driveGetToken(false);
   const rootId   = localStorage.getItem('sw_drive_root_id');
 
@@ -1093,6 +1102,10 @@ async function drivePullSync() {
   }
   if (Array.isArray(parsed.indexedDB)) {
     for (const item of parsed.indexedDB) await itemPut(item);
+  }
+  // Restore per-page audio (present in v2+ sync files).
+  if (Array.isArray(parsed.audio)) {
+    for (const entry of parsed.audio) await audioPut(entry.id, entry.data);
   }
   window.location.reload();
 }
