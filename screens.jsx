@@ -1297,7 +1297,7 @@ function LegacyReader({ t, story, onClose, onRate, onDelete }) {
 }
 
 // ─── PagedReader (v2 AI stories with pages[]) ─────────────────
-function PagedReader({ t, story, onClose, onRate, onDelete }) {
+function PagedReader({ t, story, onClose, onRate, onDelete, addToast }) {
   const [currentPage, setCurrentPage] = useState(0);
   const [playing,     setPlaying]     = useState(false);
   const [audioByPage, setAudioByPage] = useState({});
@@ -1305,15 +1305,28 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
   const [imageZoom,   setImageZoom]   = useState(false);
   const [rating,      setRating]      = useState(story.rating || 0);
   const [tapHint,     setTapHint]     = useState(false);
+  const [localImages, setLocalImages] = useState({});     // per-page image overrides after regen
+  const [imageRegen,  setImageRegen]  = useState('idle'); // 'idle' | 'pending' | 'error'
+  const [audioRegen,  setAudioRegen]  = useState('idle'); // 'idle' | 'pending' | 'error'
+  const [costOpen,    setCostOpen]    = useState(false);  // cost breakdown expanded
   const audioRef    = useRef(null);
   const tapHintRef  = useRef(null);
 
   const pages      = story.pages || [];
   const page       = pages[currentPage] || null;
   const isLastPage = currentPage === pages.length - 1;
+  // Use local override if present (post-regen), else fall back to story data
+  const pageImage  = localImages[currentPage] !== undefined ? localImages[currentPage] : (page?.image || null);
   const audioSrc   = audioByPage[currentPage] || null;
+  const pageHasAudio = !!audioSrc;
 
-  // Load all per-page audios once on mount
+  // Reset regen state on page change
+  useEffect(() => {
+    setImageRegen('idle');
+    setAudioRegen('idle');
+  }, [currentPage]);
+
+  // Load all per-page audios once on mount (or when audioReady flips)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1369,6 +1382,40 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
   };
   const handleRate = (n) => { setRating(n); if (onRate) onRate(story.id, n); };
 
+  const handleRegenImage = async () => {
+    setImageRegen('pending');
+    try {
+      const img = await window.SW.regeneratePageImage(story.id, currentPage, null);
+      if (img) {
+        setLocalImages(prev => ({ ...prev, [currentPage]: img }));
+        setImageRegen('idle');
+      } else {
+        setImageRegen('error');
+        addToast?.('Image could not be regenerated — try again', 'error');
+      }
+    } catch (e) {
+      setImageRegen('error');
+      addToast?.(`Image regeneration failed: ${e.message}`, 'error');
+    }
+  };
+
+  const handleRegenAudio = async () => {
+    setAudioRegen('pending');
+    try {
+      const wav = await window.SW.regeneratePageAudio(story.id, currentPage, null);
+      if (wav) {
+        setAudioByPage(prev => ({ ...prev, [currentPage]: wav }));
+        setAudioRegen('idle');
+      } else {
+        setAudioRegen('error');
+        addToast?.('Audio could not be regenerated — try again', 'error');
+      }
+    } catch (e) {
+      setAudioRegen('error');
+      addToast?.(`Audio regeneration failed: ${e.message}`, 'error');
+    }
+  };
+
   const renderLine = (line, i) => {
     const parts = line.split(/(\{[^}]+\})/g);
     return (
@@ -1382,6 +1429,31 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
     );
   };
 
+  // Cost estimate (Section E) — rough calculation using MODEL_PRICING
+  const costInfo = (() => {
+    const pricing   = (typeof window.SW?.getModelPricing === 'function') ? window.SW.getModelPricing() : {};
+    const textModel = (typeof window.SW?.getTextModel  === 'function') ? window.SW.getTextModel()  : '';
+    const imgModel  = (typeof window.SW?.getImageModel === 'function') ? window.SW.getImageModel() : '';
+    const audModel  = (typeof window.SW?.getAudioModel === 'function') ? window.SW.getAudioModel() : '';
+
+    const textP = pricing[textModel] || {};
+    // Rough estimate: ~1000 input tokens + 100 output tokens per page for text call
+    const textCost = (textP.inputPer1M && textP.outputPer1M)
+      ? (1000 * textP.inputPer1M / 1e6 + pages.length * 100 * textP.outputPer1M / 1e6)
+      : 0;
+
+    const nImages = pages.filter((p, i) => localImages[i] !== undefined ? localImages[i] : p.image).length;
+    const imgP    = pricing[imgModel] || {};
+    const imgCost = imgP.perImage ? nImages * imgP.perImage : 0;
+
+    const nAudio  = pages.filter((_, i) => audioByPage[i]).length;
+    const audP    = pricing[audModel] || {};
+    const audCost = audP.perSecond ? nAudio * 10 * audP.perSecond : 0; // estimate ~10 s/page
+
+    const total = textCost + imgCost + audCost;
+    return { textCost, imgCost, audCost, nImages, nAudio, total };
+  })();
+
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 100, background: '#050514', display: 'flex', flexDirection: 'column' }}>
       {/* Hidden audio — src set imperatively */}
@@ -1394,11 +1466,21 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
 
       {/* ── Full-bleed image section ── */}
       <div style={{ flex: '0 0 68vh', position: 'relative', overflow: 'hidden', background: 'radial-gradient(110% 90% at 50% -10%, #1e1b4b 0%, #050514 70%)' }}>
-        {page && page.image && (
-          <img src={page.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        {pageImage && (
+          <img src={pageImage} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
         )}
-        {(!page || !page.image) && (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 80 }}>📖</div>
+        {!pageImage && (
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+            <div style={{ fontSize: 64 }}>📖</div>
+            <button
+              onClick={handleRegenImage}
+              disabled={imageRegen === 'pending'}
+              style={{ padding: '8px 20px', borderRadius: 999, background: imageRegen === 'pending' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.18)', color: imageRegen === 'pending' ? 'rgba(254,243,199,0.4)' : '#fef3c7', fontFamily: t.fontBody, fontWeight: 600, fontSize: 13, cursor: imageRegen === 'pending' ? 'default' : 'pointer', display: 'flex', alignItems: 'center', gap: 7 }}
+            >
+              <Icon name="image" size={14} stroke={2} />
+              {imageRegen === 'pending' ? 'Generating…' : imageRegen === 'error' ? 'Try again' : 'Regenerate image'}
+            </button>
+          </div>
         )}
 
         {/* Bottom gradient */}
@@ -1422,8 +1504,8 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
           <Icon name="close" size={18} stroke={2.5} />
         </button>
 
-        {/* Lightbox expand icon */}
-        {page && page.image && (
+        {/* Lightbox expand icon — only when current page has an image */}
+        {pageImage && (
           <button onClick={() => setImageZoom(true)} style={{ position: 'absolute', top: 112, right: 20, zIndex: 5, width: 36, height: 36, borderRadius: 999, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', color: '#fef3c7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(12px)' }}>
             <Icon name="eye" size={15} stroke={2} />
           </button>
@@ -1439,12 +1521,26 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
 
       {/* ── Text panel ── */}
       <div style={{ flex: 1, background: 'rgba(5,5,20,0.96)', overflowY: 'auto', padding: '14px 24px 24px', display: 'flex', flexDirection: 'column' }}>
-        {/* Play/pause pill */}
-        {audioSrc && (
+        {/* Play/pause pill — shown when page HAS audio */}
+        {pageHasAudio && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
             <button onClick={togglePlay} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 999, background: playing ? `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})` : 'rgba(255,255,255,0.08)', border: `1px solid ${playing ? 'transparent' : t.glassBorder}`, color: playing ? '#1a0a3e' : t.text, fontFamily: t.fontBody, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
               <Icon name={playing ? 'pause' : 'play'} size={14} stroke={2} />
               {playing ? 'Pause' : 'Play'}
+            </button>
+          </div>
+        )}
+
+        {/* Regenerate audio — shown when page has NO audio */}
+        {!pageHasAudio && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+            <button
+              onClick={handleRegenAudio}
+              disabled={audioRegen === 'pending'}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 999, background: 'rgba(255,255,255,0.06)', border: `1px solid rgba(255,255,255,0.12)`, color: audioRegen === 'pending' ? 'rgba(254,243,199,0.35)' : 'rgba(254,243,199,0.55)', fontFamily: t.fontBody, fontWeight: 600, fontSize: 13, cursor: audioRegen === 'pending' ? 'default' : 'pointer' }}
+            >
+              <Icon name="wand" size={13} stroke={2} />
+              {audioRegen === 'pending' ? 'Recording…' : audioRegen === 'error' ? 'Try again' : 'Regenerate audio'}
             </button>
           </div>
         )}
@@ -1455,7 +1551,7 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
         </div>
 
         {/* Tap-to-continue hint when no audio */}
-        {tapHint && (
+        {tapHint && !pageHasAudio && (
           <div style={{ color: 'rgba(254,243,199,0.45)', fontFamily: t.fontBody, fontSize: 13, fontStyle: 'italic', textAlign: 'center', paddingTop: 6 }}>
             Tap → to continue
           </div>
@@ -1473,6 +1569,22 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
                   </button>
                 ))}
               </div>
+              {/* Cost estimate */}
+              {costInfo.total > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <button onClick={() => setCostOpen(o => !o)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'rgba(254,243,199,0.35)', fontFamily: t.fontBody, fontSize: 12, padding: '2px 0' }}>
+                    Cost ~ ${costInfo.total.toFixed(3)} {costOpen ? '▲' : '▼'}
+                  </button>
+                  {costOpen && (
+                    <div style={{ marginTop: 6, color: 'rgba(254,243,199,0.45)', fontFamily: t.fontBody, fontSize: 11, lineHeight: 1.7, textAlign: 'left', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 10 }}>
+                      <div>Text: ${costInfo.textCost.toFixed(4)}</div>
+                      <div>Images: {costInfo.nImages} × ${(costInfo.imgCost / (costInfo.nImages || 1)).toFixed(4)} = ${costInfo.imgCost.toFixed(4)}</div>
+                      <div>Audio: {costInfo.nAudio} clips × ~10 s = ${costInfo.audCost.toFixed(4)}</div>
+                      <div style={{ color: 'rgba(254,243,199,0.25)', marginTop: 4 }}>Estimate only — see ai.google.dev/pricing</div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             {onDelete && (
               <div style={{ marginTop: 14, textAlign: 'center' }}>
@@ -1486,9 +1598,9 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
       </div>
 
       {/* Lightbox */}
-      {imageZoom && page && page.image && (
+      {imageZoom && pageImage && (
         <div onClick={() => setImageZoom(false)} style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(2,6,23,0.92)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'zoom-out' }}>
-          <img src={page.image} alt="" style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 24, objectFit: 'contain', boxShadow: '0 24px 80px rgba(0,0,0,0.7)' }} />
+          <img src={pageImage} alt="" style={{ maxWidth: '92vw', maxHeight: '88vh', borderRadius: 24, objectFit: 'contain', boxShadow: '0 24px 80px rgba(0,0,0,0.7)' }} />
           <button onClick={(e) => { e.stopPropagation(); setImageZoom(false); }} style={{ position: 'absolute', top: 20, right: 20, width: 40, height: 40, borderRadius: 999, background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.2)', color: '#fef3c7', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="close" size={18} stroke={2.5} />
           </button>
@@ -1499,10 +1611,10 @@ function PagedReader({ t, story, onClose, onRate, onDelete }) {
 }
 
 // ─── Reader — routes to PagedReader (v2) or LegacyReader ──────
-function Reader({ t, story, onClose, onRate, onDelete }) {
+function Reader({ t, story, onClose, onRate, onDelete, addToast }) {
   const isPaged = story.version === 2 && Array.isArray(story.pages);
   return isPaged
-    ? <PagedReader t={t} story={story} onClose={onClose} onRate={onRate} onDelete={onDelete} />
+    ? <PagedReader t={t} story={story} onClose={onClose} onRate={onRate} onDelete={onDelete} addToast={addToast} />
     : <LegacyReader t={t} story={story} onClose={onClose} onRate={onRate} onDelete={onDelete} />;
 }
 

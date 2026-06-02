@@ -2,7 +2,7 @@
 // Strategy: network-first for app files (so updates propagate immediately),
 // cache-first for CDN resources (pinned versions that never change).
 
-const CACHE = 'storyweaver-v4';
+const CACHE = 'storyweaver-v5';
 const CDN_ORIGINS = ['https://unpkg.com/', 'https://fonts.gstatic.com', 'https://fonts.googleapis.com'];
 
 self.addEventListener('install', (e) => {

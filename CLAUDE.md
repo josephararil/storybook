@@ -174,6 +174,9 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `weaveStory(form, existingIds, signal, onProgress)` | Fans out per-page image + audio generation in parallel after text resolves. Returns `{ story, assetsPromise }` — `story` has `pages[]` with images inlined and `coverImage = pages[0].image`; `assetsPromise` resolves to `audioResults[]` when all page audio settles. Emits phases: `'text'`, `'assets'`, `'pageAsset'`, `'imageRetry'`, `'audio'`. |
 | `generateAudioForPage(text, signal)` | Calls Gemini TTS for a single page's `audioPrompt` string; 60 s timeout; returns a WAV data URL or null. |
 | `generateLinkCover(description, signal)` | Generate a cover image for a linked storybook; `description` is a free-text prompt about the book; returns a WebP data URL or throws |
+| `regeneratePageImage(storyId, pageIdx, signal)` | Re-run `callImageApi` for one page's `imagePrompt`; updates `pages[pageIdx].image` (and `coverImage` if `pageIdx === 0`) in IDB; returns the new data URL or null on failure |
+| `regeneratePageAudio(storyId, pageIdx, signal)` | Re-run `generateAudioForPage` for one page's `audioPrompt`; writes via `audioPutPage`; bumps `story.audioReady = true` in IDB if all pages now have audio; returns the WAV data URL or null |
+| `getModelPricing()` | Returns the `MODEL_PRICING` constant (see below) |
 | `drive.isConnected()` | Returns true if a Drive account email is stored in localStorage |
 | `drive.getEmail()` | Returns the connected Google account email (or `''`) |
 | `drive.connect()` | Triggers OAuth2 popup (account picker), fetches user email, creates `StoryWeaver/covers/` and `StoryWeaver/audio/` folders, stores folder IDs in localStorage |
@@ -476,9 +479,42 @@ The active theme is a single object (`TH_STARRY`) passed as the `t` prop to all 
 
 To update the default photo: convert the new image to base64 JPEG and replace the `data` value in `sophie.js`.
 
+## Per-Page Regeneration (PagedReader)
+
+When a v2 story page is missing its image or audio, `PagedReader` shows inline recovery buttons:
+
+- **Missing image** — a "Regenerate image" button is overlaid on the 📖 placeholder in the image section. Clicking calls `window.SW.regeneratePageImage`. On success the new image is applied via a `localImages` state map (overrides `page.image` without mutating the prop or re-loading the full story). Button shows "Generating…" while in flight and "Try again" after an error.
+- **Missing audio** — a "Regenerate audio" button appears in the text panel where Play/Pause would be. Clicking calls `window.SW.regeneratePageAudio`. On success `audioByPage` state is updated directly, which re-triggers the auto-play effect. Button shows "Recording…" while in flight.
+
+Both regen paths flow through `SW_TRACKER` so calls appear in the call indicator and Event Log. Errors are surfaced via `addToast` (prop passed from `app.jsx`).
+
+## Cost Estimate (PagedReader, last page)
+
+On the last page of a v2 story, below the star rating, a faint "Cost ~ $X.XXX ▼" button appears when any pricing data is available. Tapping expands an inline breakdown showing text / image / audio costs separately.
+
+Costs are computed from `MODEL_PRICING` in `store.js`:
+```js
+// Approximate Gemini pricing (USD) — https://ai.google.dev/pricing
+const MODEL_PRICING = {
+  'gemini-2.5-flash':             { inputPer1M: 0.15,  outputPer1M: 0.60  },
+  'gemini-3.5-flash':             { inputPer1M: 0.15,  outputPer1M: 0.60  },
+  'gemini-2.5-flash-image':       { perImage: 0.039 },
+  'gemini-2.5-flash-preview-tts': { perSecond: 0.000040 },
+  ...
+};
+```
+
+- **Text**: 1 000 input tokens + `pages.length × 100` output tokens at model rates.
+- **Images**: `nImages × pricing.perImage`
+- **Audio**: `nAudio × 10 s × pricing.perSecond` (fixed 10-second/page estimate)
+
+The breakdown also notes "Estimate only — see ai.google.dev/pricing."
+
+`SW_TRACKER` events now store `inputTokens`, `outputTokens` (from `usageMetadata` in text responses) and `audioSeconds` (from WAV byte length in TTS responses) when available.
+
 ## Service Worker Cache
 
-The cache is keyed `storyweaver-v4` in `sw.js`. Bump this string when you need to force-clear CDN caches on existing installs (app files are network-first and don't need a bump).
+The cache is keyed `storyweaver-v5` in `sw.js`. Bump this string when you need to force-clear CDN caches on existing installs (app files are network-first and don't need a bump).
 
 **Local dev note:** app files are network-first so they always load fresh when online. CDN resources are still cached aggressively. If you need a completely clean slate, unregister the SW and clear caches:
 ```js

@@ -398,7 +398,7 @@ function StoryWeaverApp() {
       <BottomNav t={theme} tab={tab} onChange={onTabChange} />
 
       {openStory && (
-        <Reader t={theme} story={openStory} onClose={() => navigate('/')} onRate={onRate} onDelete={onDelete} />
+        <Reader t={theme} story={openStory} onClose={() => navigate('/')} onRate={onRate} onDelete={onDelete} addToast={addToast} />
       )}
       {isWeaving && <Weaving t={theme} error={weaveError} phase={weavePhase} onCancel={onCancelWeave} onReadReady={(weavePhase === 'imagePending' || weavePhase === 'audio') ? onReadReady : null} weavingProgress={weavingProgress} />}
 

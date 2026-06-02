@@ -8,6 +8,18 @@ const DEFAULT_AUDIO_MODEL = "gemini-2.5-flash-preview-tts";
 const MIN_PAGES = 4;
 const MAX_PAGES = 10;
 
+// Approximate Gemini API pricing (USD) — https://ai.google.dev/pricing
+// inputPer1M / outputPer1M: cost per 1 million tokens. perImage: per generated image.
+// perSecond: cost per second of generated audio (24 kHz 16-bit mono PCM).
+const MODEL_PRICING = {
+  'gemini-2.5-flash':             { inputPer1M: 0.15,  outputPer1M: 0.60  },
+  'gemini-3.5-flash':             { inputPer1M: 0.15,  outputPer1M: 0.60  },
+  'gemini-2.5-flash-image':       { perImage: 0.039 },
+  'gemini-3.1-flash-image':       { perImage: 0.039 },
+  'gemini-2.5-flash-preview-tts': { perSecond: 0.000040 },
+  'gemini-3.1-flash-tts-preview': { perSecond: 0.000040 },
+};
+
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
 
@@ -57,6 +69,14 @@ function itemDelete(id) {
     const req = db.transaction('items', 'readwrite').objectStore('items').delete(id);
     req.onsuccess = () => resolve();
     req.onerror  = ()  => reject(req.error);
+  }));
+}
+
+function itemGet(id) {
+  return dbOpen().then(db => new Promise((resolve, reject) => {
+    const req = db.transaction('items', 'readonly').objectStore('items').get(id);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror   = ()  => reject(req.error);
   }));
 }
 
@@ -505,7 +525,12 @@ async function textCall(form, existingIds, signal) {
     if (!Array.isArray(story.vocab)) story.vocab = [];
     story.id = uniqueId(slugify(story.title), existingIds);
 
-    window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
+    const usage = data.usageMetadata || {};
+    window.SW_TRACKER?.succeed(_tid, {
+      durationMs:   Date.now() - _t0,
+      inputTokens:  usage.promptTokenCount    || undefined,
+      outputTokens: usage.candidatesTokenCount || undefined,
+    });
     return story;
   } catch (e) {
     window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: e.message });
@@ -708,9 +733,10 @@ async function generateAudioForPage(text, signal) {
     let off = 0;
     for (const arr of decoded) { combined.set(arr, off); off += arr.length; }
 
-    const wavBuf    = pcmToWav(combined, 24000, 1, 16);
-    const wavBase64 = uint8ArrayToBase64(new Uint8Array(wavBuf));
-    window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
+    const wavBuf      = pcmToWav(combined, 24000, 1, 16);
+    const wavBase64   = uint8ArrayToBase64(new Uint8Array(wavBuf));
+    const audioSeconds = combined.length / (24000 * 2); // 24 kHz, 16-bit mono
+    window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0, audioSeconds });
     return `data:audio/wav;base64,${wavBase64}`;
   } catch (e) {
     const errMsg = e.name === 'AbortError' ? 'Cancelled' : e.message;
@@ -720,6 +746,37 @@ async function generateAudioForPage(text, signal) {
   } finally {
     clearTimeout(timerId);
   }
+}
+
+// ─── Per-page regeneration ────────────────────────────────────
+
+// Regenerate a single page's image. Updates the story in IDB and returns the new data URL.
+// Returns null if generation fails (caller should surface the failure via addToast).
+async function regeneratePageImage(storyId, pageIdx, signal) {
+  const story = await itemGet(storyId);
+  if (!story?.pages?.[pageIdx]) return null;
+  const img = await callImageApi(story.pages[pageIdx].imagePrompt, signal);
+  if (!img) return null;
+  const updatedPages = story.pages.map((p, i) => i === pageIdx ? { ...p, image: img } : p);
+  const updated = { ...story, pages: updatedPages };
+  if (pageIdx === 0) updated.coverImage = img;
+  await itemPut(updated);
+  return img;
+}
+
+// Regenerate a single page's audio. Writes via audioPutPage and bumps audioReady if all pages now have audio.
+// Returns the WAV data URL, or null on failure.
+async function regeneratePageAudio(storyId, pageIdx, signal) {
+  const story = await itemGet(storyId);
+  if (!story?.pages?.[pageIdx]) return null;
+  const wav = await generateAudioForPage(story.pages[pageIdx].audioPrompt, signal);
+  if (!wav) return null;
+  await audioPutPage(storyId, pageIdx, wav);
+  const allAudio = await Promise.all(story.pages.map((_, i) => audioGetPage(storyId, i)));
+  if (allAudio.every(Boolean)) {
+    await itemPut({ ...story, audioReady: true });
+  }
+  return wav;
 }
 
 // ─── Main weave entry point ───────────────────────────────────
@@ -1053,7 +1110,8 @@ window.SW = {
   getChildName, setChildName, getChildBirthday, setChildBirthday,
   getSampleImage, setSampleImage, clearSampleImage, compressImageForStorage,
   mergeItems, uniqueId, slugify,
-  weaveStory, generateLinkCover,
+  weaveStory, generateLinkCover, regeneratePageImage, regeneratePageAudio,
+  getModelPricing: () => MODEL_PRICING,
   drive: {
     isConnected:   driveIsConnected,
     getEmail:      driveGetEmail,
