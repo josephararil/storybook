@@ -169,7 +169,7 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `getSeedDeletions()` | Return array of deleted seed IDs |
 | `uniqueId(base, existingIds)` | Generate a unique kebab-case ID |
 | `slugify(title)` | Convert title to kebab-case |
-| `weaveStory(form, existingIds, signal, onProgress)` | Fans out per-page image + audio generation in parallel after text resolves. Returns `{ story, assetsPromise }` — `story` has `pages[]` with images inlined and `coverImage = pages[0].image`; `assetsPromise` resolves to `audioResults[]` when all page audio settles. Emits phases: `'text'`, `'assets'`, `'pageAsset'`, `'imageRetry'`. |
+| `weaveStory(form, existingIds, signal, onProgress)` | Fans out per-page image + audio generation in parallel after text resolves. Returns `{ story, assetsPromise }` — `story` has `pages[]` with images inlined and `coverImage = pages[0].image`; `assetsPromise` resolves to `audioResults[]` when all page audio settles. Emits phases: `'text'`, `'assets'`, `'pageAsset'`, `'imageRetry'`, `'audio'`. |
 | `generateAudioForPage(text, signal)` | Calls Gemini TTS for a single page's `audioPrompt` string; 60 s timeout; returns a WAV data URL or null. |
 | `generateLinkCover(description, signal)` | Generate a cover image for a linked storybook; `description` is a free-text prompt about the book; returns a WebP data URL or throws |
 | `drive.isConnected()` | Returns true if a Drive account email is stored in localStorage |
@@ -233,15 +233,16 @@ Generation fans out per-page in parallel after text resolves:
    - `callImageApi(page.imagePrompt, signal, reason => onProgress('imageRetry', { idx, reason }))`
    - `generateAudioForPage(page.audioPrompt, signal)` (60 s timeout)
    - Both emit `onProgress('pageAsset', { idx, kind: 'image'|'audio', ok })` on settle
-4. **`Promise.allSettled(imagePromises)` resolves** → images inlined into `pages[].image`; `coverImage = pages[0].image`
+4. **`Promise.allSettled(imagePromises)` resolves** → `onProgress('audio', null)` fired → images inlined into `pages[].image`; `coverImage = pages[0].image`
 5. **`weaveStory` returns** `{ story, assetsPromise }` — story is fully formed with images; audio is still in flight
-6. **`onWeave` in `app.jsx`** saves the story, navigates immediately, then awaits `assetsPromise`. When it resolves, each page's audio is written via `audioPutPage(id, idx, wav)` and `audioReady: true` is set on the story.
+6. **`onWeave` in `app.jsx`** saves the story, awaits `assetsPromise` (blocking navigation), writes per-page audio via `audioPutPage(id, idx, wav)`, sets `audioReady: true`, then navigates.
 
 `onProgress` phase keys:
 - `'text'` / null — text call starting
 - `'assets'` / `{ story, total }` — text done, assets fanning out (`app.jsx` maps to `'imagePending'` UI state)
 - `'pageAsset'` / `{ idx, kind, ok }` — one image or audio settled (rendered as progress pips in the Weaving screen)
 - `'imageRetry'` / `{ idx, reason }` — per-page image retry fallback
+- `'audio'` / null — all images settled, audio still in flight (`app.jsx` maps to `'audio'` UI phase)
 
 ### Image Safety & Retry Logic
 
@@ -273,7 +274,7 @@ Generated dynamically per request using a sectioned structure:
 |---|---|
 | `[CHARACTER & TONE]` | Dynamic child name; companion line (specific if `form.character` set, generic otherwise); tone word; atmosphere; restricted words |
 | `[STYLE & FORMATTING]` | Prose sentence rules **or** AABB rhyme rules; vocabulary brace requirement |
-| `[NARRATIVE ARC]` | Dynamic page count (`targetPages = clamp(round(length / 0.65), MIN_PAGES, MAX_PAGES)`); named page beats: Discovery → Exploration (middle pages) → Comfort → Resolution |
+| `[NARRATIVE ARC]` | Dynamic page count (`targetPages = clamp(form.pages || 6, MIN_PAGES, MAX_PAGES)`); named page beats: Discovery → Exploration (middle pages) → Comfort → Resolution |
 | `[PAGE FIELDS]` | Per-page rules: `text` (≤ ~35 words, vocab braces here only), `imagePrompt` (~40–60 words, no text/lettering), `audioPrompt` (plain narration + 1–2 audio tags from curated list) |
 | `[JSON SCHEMA OUTPUT]` | Valid enum values, palette format, id format; `pages` array count |
 
@@ -301,27 +302,34 @@ The Creator screen lifts all form state into `app.jsx`:
 | State | Default | Description |
 |---|---|---|
 | `context` | `''` | Today's context / seed for the story; placeholder "What did you do today?" |
-| `vocab` | `[]` | Vocabulary words to weave in; user adds them as tags |
-| `length` | `4` | Target minutes (2–8) |
-| `tone` | `'Gentle'` | Tone string — any of the preset chips or free-text entry |
+| `vocab` | `[]` | Vocabulary words to weave in; user adds them as tags (optional — label says so) |
+| `pages` | `6` | Target page count (range 4–10); slider labeled "How many pages?" |
+| `tone` | `'Gentle'` | Tone string — free-text only; placeholder "e.g. calming, silly, adventurous, dreamy…" |
 | `storyStyle` | `'prose'` | `'prose'` or `'rhyme'` (AABB couplets) |
 | `character` | `''` | Optional character the child meets; plain text input |
 
-`tone` is a **string** (not a number). `buildSystemPrompt`, `textCall`, and `imageCall` in `store.js` all accept a tone string directly; they fall back to `'Gentle'` if the string is empty. The UI renders five preset chips (Calming / Cozy / Gentle / Playful / Adventurous) plus a free-text input for custom tones. There are no character presets.
+`tone` is a **string** (not a number). `buildSystemPrompt`, `textCall`, and `imageCall` in `store.js` all accept a tone string directly; they fall back to `'Gentle'` if the string is empty. There are no tone preset chips — free-text input only.
+
+`pages` is passed directly to `textCall` where `targetPages = clamp(form.pages || 6, MIN_PAGES, MAX_PAGES)`. `MIN_PAGES = 4`, `MAX_PAGES = 10`.
 
 ## Weaving Screen (Loading State)
 
 `Weaving` component shows a phase progress list during generation. Phases reflect parallel execution:
 
-- **phase `'text'`** — "Writing your story" + "Painting the cover" **both show active spinners** (running in parallel)
-- **phase `'imagePending'`** — "Writing your story" shows ✓, "Painting the cover" + "Recording narration" both show spinners. "Skip cover · Read now" button appears when `onSkipImage` prop is non-null.
+- **phase `'text'`** — animated orb, "Writing your story" spinner
+- **phase `'imagePending'`** — compact star, "Writing your story" shows ✓, per-page grid with img + aud pips per page, "🔊 Recording narration" spinner row
+- **phase `'audio'`** — same as `'imagePending'` but audio row is highlighted (text colour instead of muted); emitted by `weaveStory` after `Promise.allSettled(imagePromises)` resolves
 - **Cancel** button always visible
-- Elapsed time counter (shown after 2s)
+- Elapsed time counter (always visible, no delay gate)
+- **"Read now (some pages may be missing audio)"** early-exit button — shown during `imagePending` or `audio` phase; clicking aborts in-flight calls, marks `readNowRef`, navigates if story already saved (audio phase), or lets `onWeave` navigate when it saves the partial story (imagePending phase)
 - Error state auto-dismisses after 4s and navigates back to `/create`
 
-`getState(key)` in `Weaving` maps phase string → per-row state (`'done'`, `'active'`, `'pending'`) with special logic for parallel phases.
+**Navigation is blocked until ALL audio settles** (or user clicks "Read now"). `onWeave` in `app.jsx` awaits `assetsPromise` before calling `navigate('/story/' + id)`.
 
-Race conditions are handled via `ignoreWeaveRef` (a `useRef`): set to `true` on cancel or skip before any async continuation checks it. `onSkipImage` calls `abortRef.current.abort()` to immediately cancel image + audio in-flight.
+Race conditions are handled via:
+- `ignoreWeaveRef` (`useRef`) — set to `true` on cancel or "Read now" (audio phase); prevents double-navigation
+- `readNowRef` (`useRef`) — set to `true` on "Read now"; causes `onWeave` to navigate immediately after `itemPut` (imagePending path)
+- `weavingStoryIdRef` (`useRef`) — holds the saved story's id once `itemPut` completes; used by "Read now" to navigate directly
 
 ## Toast Notifications
 

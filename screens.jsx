@@ -372,7 +372,7 @@ function EditorialGrid({ t, stories, onOpen, onDelete, onEditLink, onRate }) {
 
 // ─── Creator ──────────────────────────────────────────────────
 
-function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, length, setLength, tone, setTone, storyStyle, setStoryStyle, character, setCharacter, childName }) {
+function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, pages, setPages, tone, setTone, storyStyle, setStoryStyle, character, setCharacter, childName }) {
   const [vocabInput, setVocabInput] = useState('');
 
   const addVocab = (e) => {
@@ -393,7 +393,6 @@ function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, 
     fontFamily: t.fontBody, fontWeight: 700, fontSize: 11, letterSpacing: 1.5,
     textTransform: 'uppercase', color: t.textMuted, marginBottom: 10, display: 'block',
   };
-  const TONE_PRESETS = ['Calming', 'Cozy', 'Gentle', 'Playful', 'Adventurous'];
 
   return (
     <div style={{ padding: '60px 20px 130px', height: '100%', boxSizing: 'border-box', overflowY: 'auto' }}>
@@ -479,7 +478,7 @@ function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, 
 
         {/* Vocab tags */}
         <div style={fieldBox}>
-          <label style={labelStyle}>Target vocabulary</label>
+          <label style={labelStyle}>Target vocabulary <span style={{ fontWeight: 500, opacity: 0.45 }}>optional</span></label>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             {vocab.map(v => (
               <div key={v} style={{
@@ -504,49 +503,34 @@ function Creator({ t, onWeave, onAddLink, context, setContext, vocab, setVocab, 
           </div>
         </div>
 
-        {/* Length slider */}
+        {/* Pages slider */}
         <div style={fieldBox}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-            <label style={{ ...labelStyle, marginBottom: 0 }}>Length</label>
-            <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle, fontSize: 22, color: t.accent }}>{length} min</div>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>How many pages?</label>
+            <div style={{ fontFamily: t.fontHead, fontWeight: t.headWeight, fontStyle: t.headStyle, fontSize: 22, color: t.accent }}>{pages} pages</div>
           </div>
-          <Slider t={t} value={length} min={2} max={8} onChange={setLength} />
+          <Slider t={t} value={pages} min={4} max={10} onChange={setPages} />
           <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: t.fontBody, fontSize: 11, color: t.textMuted, fontWeight: 600, marginTop: 6 }}>
-            <span>Short</span><span>Long</span>
+            <span>Shorter</span><span>Longer</span>
           </div>
         </div>
 
         {/* Tone */}
         <div style={fieldBox}>
           <label style={labelStyle}>Tone</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-            {TONE_PRESETS.map(toneName => {
-              const active = tone === toneName;
-              return (
-                <button key={toneName} onClick={() => setTone(active ? '' : toneName)} style={{
-                  padding: '5px 11px', borderRadius: 999, cursor: 'pointer',
-                  background: active ? t.accentSoft : 'transparent',
-                  color: active ? t.accent : t.textMuted,
-                  border: active ? `1px solid ${t.accent}44` : `1px solid ${t.glassBorder}`,
-                  fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
-                }}>{toneName}</button>
-              );
-            })}
-          </div>
           <input
-            value={TONE_PRESETS.includes(tone) ? '' : (tone || '')}
+            value={tone}
             onChange={(e) => setTone(e.target.value)}
-            placeholder="or type a tone…"
+            placeholder="e.g. calming, silly, adventurous, dreamy…"
             style={{
               width: '100%', border: 'none', outline: 'none', background: 'transparent',
               color: t.text, fontFamily: t.fontBody, fontSize: 14, fontWeight: 500,
-              borderTop: `1px solid ${t.glassBorder}`, paddingTop: 10,
             }}
           />
         </div>
 
         {/* Weave button */}
-        <button onClick={() => onWeave && onWeave({ context, vocab, length, tone, storyStyle, character })} style={{
+        <button onClick={() => onWeave && onWeave({ context, vocab, pages, tone, storyStyle, character })} style={{
           marginTop: 8, position: 'relative', border: 'none', cursor: 'pointer',
           padding: '20px 24px', borderRadius: t.navStyle === 'dock' ? 28 : 22,
           background: `linear-gradient(135deg, ${t.accent} 0%, ${tint(t.accent, -0.15)} 60%, #ec4899 130%)`,
@@ -1574,14 +1558,24 @@ function Weaving({ t, error, phase, onCancel, onReadReady, weavingProgress }) {
           </div>
         )}
 
-        {/* Elapsed time */}
-        {elapsed > 2 && (
-          <div style={{ marginTop: 8, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12, fontWeight: 500, opacity: 0.6 }}>
-            {fmtElapsed(elapsed)} elapsed
+        {/* Recording narration row — active while audio is in flight */}
+        {showGrid && (
+          <div style={{
+            marginTop: 12, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center',
+            fontFamily: t.fontBody, fontWeight: 600, fontSize: 15,
+            color: phase === 'audio' ? t.text : t.textMuted,
+          }}>
+            <div style={{ width: 13, height: 13, borderRadius: '50%', flexShrink: 0, border: `2px solid ${t.accent}`, borderTopColor: 'transparent', animation: 'sw-spin 0.75s linear infinite' }} />
+            🔊 Recording narration
           </div>
         )}
 
-        {/* Read what's ready — active once page 1 has an image */}
+        {/* Elapsed time */}
+        <div style={{ marginTop: 8, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12, fontWeight: 500, opacity: 0.6 }}>
+          {fmtElapsed(elapsed)} elapsed
+        </div>
+
+        {/* Read now early-exit — available once imagePending or audio phase */}
         {onReadReady && (
           <button onClick={onReadReady} style={{
             marginTop: 20, padding: '12px 26px', borderRadius: 14,
@@ -1589,7 +1583,7 @@ function Weaving({ t, error, phase, onCancel, onReadReady, weavingProgress }) {
             color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
             cursor: 'pointer', animation: 'sw-fadein 0.5s ease-out forwards',
           }}>
-            Read what's ready
+            Read now (some pages may be missing audio)
           </button>
         )}
 

@@ -6,7 +6,7 @@ const DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image";
 const DEFAULT_AUDIO_MODEL = "gemini-2.5-flash-preview-tts";
 
 const MIN_PAGES = 4;
-const MAX_PAGES = 14;
+const MAX_PAGES = 10;
 
 // Capture seeds once; stays static throughout the session
 window.SW_SEEDS = window.SW_STORIES;
@@ -441,7 +441,7 @@ function buildSystemPrompt(form, childName, childAppearance, targetPages) {
 
 function getDefaultSystemPrompt() {
   return buildSystemPrompt(
-    { character: '', storyStyle: 'prose', tone: 3, length: 4 },
+    { character: '', storyStyle: 'prose', tone: 3, pages: 6 },
     getChildName(),
     6
   );
@@ -450,7 +450,7 @@ function getDefaultSystemPrompt() {
 async function textCall(form, existingIds, signal) {
   const toneWord    = typeof form.tone === 'string' ? (form.tone.trim() || 'Gentle') : (TONE_WORDS[form.tone - 1] || 'Gentle');
   const childName   = getChildName();
-  const targetPages = Math.min(MAX_PAGES, Math.max(MIN_PAGES, Math.round(form.length / 0.65)));
+  const targetPages = Math.min(MAX_PAGES, Math.max(MIN_PAGES, form.pages || 6));
   const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
   const sysPrompt   = getCustomSystemPrompt() || buildSystemPrompt(form, childName, targetPages);
 
@@ -697,6 +697,7 @@ async function weaveStory(form, existingIds, signal, onProgress) {
 
   // Wait for all images to settle, then inline into pages
   const imageResults  = await Promise.allSettled(imagePromises);
+  onProgress?.('audio', null);
   const pagesWithImgs = pages.map((p, idx) => ({
     ...p,
     image: imageResults[idx].status === 'fulfilled' ? imageResults[idx].value : null,
