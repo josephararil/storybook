@@ -33,12 +33,12 @@ This is a **zero-build-tool React app** — no bundler, no package.json, no ES m
 
 - Each `.jsx` file uses `Object.assign(window, { ComponentName })` to export
 - `index.html` loads scripts in dependency order via `<script type="text/babel">`
-- Plain `<script>` tags (no Babel) are used for `data.js` and `sophie.js`
+- Plain `<script>` tags (no Babel) are used for `data.js`, `sophie.js`, and `apiTracker.js`
 
 **Script load order matters:**
 
 ```
-data.js → sophie.js → store.js → cover.jsx → screens.jsx → app.jsx
+data.js → sophie.js → apiTracker.js → store.js → cover.jsx → screens.jsx → callIndicator.jsx → app.jsx
 ```
 
 ## File Responsibilities
@@ -48,10 +48,12 @@ data.js → sophie.js → store.js → cover.jsx → screens.jsx → app.jsx
 | `index.html` | Entry point; CDN imports; script load order |
 | `data.js` | 8 seed stories in `window.SW_STORIES` / `window.SW_SEEDS` |
 | `sophie.js` | Hardcoded Sophie reference photo as `window.SOPHIE_IMAGE` (base64 JPEG, ~92 KB); plain `<script>`, not Babel |
+| `apiTracker.js` | Plain `<script>` (no Babel); exports `window.SW_TRACKER`; in-memory ring buffer + IDB persistence for Gemini call events |
 | `store.js` | All persistence and API logic; exports `window.SW`; IndexedDB wrapper, Gemini API calls, seed deletion, child profile, image compression, Google Drive integration |
 | `cover.jsx` | Procedural SVG story cover art; 8 scene types; 3 render modes |
-| `screens.jsx` | All app screens: Library, Creator, Settings, Reader, Weaving, ApiKeyModal, AddLinkModal, Toast; inline `Icon` component |
-| `app.jsx` | Root `StoryWeaverApp`; theme object; hash routing; lifted state; all event handlers |
+| `screens.jsx` | All app screens: Library, Creator, Settings (incl. Event Log), Reader, Weaving, ApiKeyModal, AddLinkModal, Toast; inline `Icon` component |
+| `callIndicator.jsx` | Floating Gemini call indicator pill + tray; exports `window.CallIndicator` and `window.useApiCalls` hook |
+| `app.jsx` | Root `StoryWeaverApp`; theme object; hash routing; lifted state; all event handlers; mounts `<CallIndicator>` |
 | `sw.js` | Service worker — network-first for app files (updates always propagate), cache-first for CDN assets (pinned versions) |
 | `manifest.webmanifest` | PWA install metadata |
 
@@ -110,7 +112,7 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 }
 ```
 
-Per-page audio is stored in the **`audio` IndexedDB store** keyed as `${storyId}::${pageIdx}` (e.g. `my-story::0`, `my-story::1`). The legacy single-story audio key (bare `storyId`) is still used by `audioGet/audioPut/audioDelete`; per-page callers use `audioGetPage/audioPutPage/audioDeleteStory`. `audioReady: true` on the story signals all pages' audio has settled.
+Per-page audio is stored in the **`audio` IndexedDB store** keyed as `${storyId}::${pageIdx}`. The database (`storyweaver`) is at **version 3** — v3 added the `events` store for the call tracker. (e.g. `my-story::0`, `my-story::1`). The legacy single-story audio key (bare `storyId`) is still used by `audioGet/audioPut/audioDelete`; per-page callers use `audioGetPage/audioPutPage/audioDeleteStory`. `audioReady: true` on the story signals all pages' audio has settled.
 
 **Out of scope (future milestones):**
 - Per-page Drive backup — only `pages[0].image` is uploaded as the story "cover" (`coverDriveId`); individual page images and audio are not backed up.
@@ -169,7 +171,7 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `getSeedDeletions()` | Return array of deleted seed IDs |
 | `uniqueId(base, existingIds)` | Generate a unique kebab-case ID |
 | `slugify(title)` | Convert title to kebab-case |
-| `weaveStory(form, existingIds, signal, onProgress)` | Fans out per-page image + audio generation in parallel after text resolves. Returns `{ story, assetsPromise }` — `story` has `pages[]` with images inlined and `coverImage = pages[0].image`; `assetsPromise` resolves to `audioResults[]` when all page audio settles. Emits phases: `'text'`, `'assets'`, `'pageAsset'`, `'imageRetry'`. |
+| `weaveStory(form, existingIds, signal, onProgress)` | Fans out per-page image + audio generation in parallel after text resolves. Returns `{ story, assetsPromise }` — `story` has `pages[]` with images inlined and `coverImage = pages[0].image`; `assetsPromise` resolves to `audioResults[]` when all page audio settles. Emits phases: `'text'`, `'assets'`, `'pageAsset'`, `'imageRetry'`, `'audio'`. |
 | `generateAudioForPage(text, signal)` | Calls Gemini TTS for a single page's `audioPrompt` string; 60 s timeout; returns a WAV data URL or null. |
 | `generateLinkCover(description, signal)` | Generate a cover image for a linked storybook; `description` is a free-text prompt about the book; returns a WebP data URL or throws |
 | `drive.isConnected()` | Returns true if a Drive account email is stored in localStorage |
@@ -199,6 +201,54 @@ All Drive keys are included in Drive sync (not sensitive — no tokens stored). 
 ### Seed Deletion Architecture
 
 Seeds are static and never stored in IndexedDB. Deleted seeds are tracked in `localStorage` under `sw_deleted_seeds` (JSON array of IDs). `mergeItems()` filters them on every call. The `onDelete` handler in `app.jsx` branches: seeds → `window.SW.deleteSeed(id)`, non-seeds → `window.SW.itemDelete(id)`.
+
+## Gemini Call Tracker (`window.SW_TRACKER`)
+
+`apiTracker.js` (plain `<script>`, loads before `store.js`) exports `window.SW_TRACKER`. It maintains an in-memory ring buffer (max 200 events) and persists completed events to the `events` IndexedDB store (added in DB version 3). On page load it replays completed events from IDB so history survives refresh.
+
+### `SW_TRACKER` API
+
+| Method | Description |
+|---|---|
+| `start({kind, model, context})` | Create an `in_flight` event; returns numeric `id`. `context` is truncated to 80 chars. |
+| `succeed(id, {durationMs})` | Mark event as `success`, persist to IDB, notify subscribers. |
+| `fail(id, {durationMs, error})` | Mark event as `error`, persist to IDB, notify subscribers. |
+| `getActive()` | Returns all `in_flight` events. |
+| `getRecent(limit=20)` | Returns most recent completed events (newest first). |
+| `getAll(limit=200)` | Returns all events (active + recent). |
+| `subscribe(cb)` | Register a listener; returns an unsubscribe function. Used by `useApiCalls()` hook. |
+| `clearLog()` | Removes all completed events from memory and clears the IDB `events` store. |
+
+### `events` IDB store
+
+Added in DB version 3 (shared `storyweaver` database, alongside `items` and `audio`). Key path is `id` (numeric, assigned by JS). Only settled events (status `success` or `error`) are written; `in_flight` events are memory-only.
+
+### Instrumented Gemini calls
+
+Every Gemini fetch in `store.js` must go through the tracker:
+
+| Function | `kind` | Notes |
+|---|---|---|
+| `textCall` | `'text'` | Context = first 80 chars of `form.context` |
+| `callImageApi` (per attempt) | `'image'` | Each of the 3 retry attempts is a separate event; context prefixed `[a1]`/`[a2]`/`[a3]` |
+| `generateAudioForPage` | `'audio'` | Context = first 80 chars of `audioPrompt` text |
+| `validateApiKey` | `'validate'` | Context = `'API key validation'` |
+
+**Rule:** Any new Gemini fetch added to `store.js` must call `SW_TRACKER.start` / `succeed` / `fail`. Drive API calls are out of scope — do not instrument them.
+
+### `CallIndicator` component
+
+`callIndicator.jsx` exports `CallIndicator` (mounted in `app.jsx`) and `useApiCalls()` hook (also used by `Weaving` in `screens.jsx`).
+
+- **Pill** — fixed top-right, z-index 250; hidden when no active calls and tray is closed; shows live call count with pulsing dot.
+- **Tray** — drops down on tap; lists active calls (live duration counter) and up to 20 recent finished calls (✓/✗, duration, error); "View full log →" navigates to Settings → Event Log.
+
+### Settings → Event Log section
+
+Collapsible row in `Settings` (`screens.jsx`), below Google Drive and above Gemini AI. Shows up to 200 completed events grouped by calendar day. Each row: timestamp, model, kind, status (✓/✗), duration, error message. Two action buttons:
+
+- **Copy log** — copies all events as JSON to clipboard.
+- **Clear log** — calls `SW_TRACKER.clearLog()` and empties the IDB `events` store.
 
 ## Gemini AI Integration
 
@@ -233,15 +283,16 @@ Generation fans out per-page in parallel after text resolves:
    - `callImageApi(page.imagePrompt, signal, reason => onProgress('imageRetry', { idx, reason }))`
    - `generateAudioForPage(page.audioPrompt, signal)` (60 s timeout)
    - Both emit `onProgress('pageAsset', { idx, kind: 'image'|'audio', ok })` on settle
-4. **`Promise.allSettled(imagePromises)` resolves** → images inlined into `pages[].image`; `coverImage = pages[0].image`
+4. **`Promise.allSettled(imagePromises)` resolves** → `onProgress('audio', null)` fired → images inlined into `pages[].image`; `coverImage = pages[0].image`
 5. **`weaveStory` returns** `{ story, assetsPromise }` — story is fully formed with images; audio is still in flight
-6. **`onWeave` in `app.jsx`** saves the story, navigates immediately, then awaits `assetsPromise`. When it resolves, each page's audio is written via `audioPutPage(id, idx, wav)` and `audioReady: true` is set on the story.
+6. **`onWeave` in `app.jsx`** saves the story, awaits `assetsPromise` (blocking navigation), writes per-page audio via `audioPutPage(id, idx, wav)`, sets `audioReady: true`, then navigates.
 
 `onProgress` phase keys:
 - `'text'` / null — text call starting
 - `'assets'` / `{ story, total }` — text done, assets fanning out (`app.jsx` maps to `'imagePending'` UI state)
 - `'pageAsset'` / `{ idx, kind, ok }` — one image or audio settled (rendered as progress pips in the Weaving screen)
 - `'imageRetry'` / `{ idx, reason }` — per-page image retry fallback
+- `'audio'` / null — all images settled, audio still in flight (`app.jsx` maps to `'audio'` UI phase)
 
 ### Image Safety & Retry Logic
 
@@ -273,7 +324,7 @@ Generated dynamically per request using a sectioned structure:
 |---|---|
 | `[CHARACTER & TONE]` | Dynamic child name; companion line (specific if `form.character` set, generic otherwise); tone word; atmosphere; restricted words |
 | `[STYLE & FORMATTING]` | Prose sentence rules **or** AABB rhyme rules; vocabulary brace requirement |
-| `[NARRATIVE ARC]` | Dynamic page count (`targetPages = clamp(round(length / 0.65), MIN_PAGES, MAX_PAGES)`); named page beats: Discovery → Exploration (middle pages) → Comfort → Resolution |
+| `[NARRATIVE ARC]` | Dynamic page count (`targetPages = clamp(form.pages || 6, MIN_PAGES, MAX_PAGES)`); named page beats: Discovery → Exploration (middle pages) → Comfort → Resolution |
 | `[PAGE FIELDS]` | Per-page rules: `text` (≤ ~35 words, vocab braces here only), `imagePrompt` (~40–60 words, no text/lettering), `audioPrompt` (plain narration + 1–2 audio tags from curated list) |
 | `[JSON SCHEMA OUTPUT]` | Valid enum values, palette format, id format; `pages` array count |
 
@@ -301,27 +352,34 @@ The Creator screen lifts all form state into `app.jsx`:
 | State | Default | Description |
 |---|---|---|
 | `context` | `''` | Today's context / seed for the story; placeholder "What did you do today?" |
-| `vocab` | `[]` | Vocabulary words to weave in; user adds them as tags |
-| `length` | `4` | Target minutes (2–8) |
-| `tone` | `'Gentle'` | Tone string — any of the preset chips or free-text entry |
+| `vocab` | `[]` | Vocabulary words to weave in; user adds them as tags (optional — label says so) |
+| `pages` | `6` | Target page count (range 4–10); slider labeled "How many pages?" |
+| `tone` | `'Gentle'` | Tone string — free-text only; placeholder "e.g. calming, silly, adventurous, dreamy…" |
 | `storyStyle` | `'prose'` | `'prose'` or `'rhyme'` (AABB couplets) |
 | `character` | `''` | Optional character the child meets; plain text input |
 
-`tone` is a **string** (not a number). `buildSystemPrompt`, `textCall`, and `imageCall` in `store.js` all accept a tone string directly; they fall back to `'Gentle'` if the string is empty. The UI renders five preset chips (Calming / Cozy / Gentle / Playful / Adventurous) plus a free-text input for custom tones. There are no character presets.
+`tone` is a **string** (not a number). `buildSystemPrompt`, `textCall`, and `imageCall` in `store.js` all accept a tone string directly; they fall back to `'Gentle'` if the string is empty. There are no tone preset chips — free-text input only.
+
+`pages` is passed directly to `textCall` where `targetPages = clamp(form.pages || 6, MIN_PAGES, MAX_PAGES)`. `MIN_PAGES = 4`, `MAX_PAGES = 10`.
 
 ## Weaving Screen (Loading State)
 
 `Weaving` component shows a phase progress list during generation. Phases reflect parallel execution:
 
-- **phase `'text'`** — "Writing your story" + "Painting the cover" **both show active spinners** (running in parallel)
-- **phase `'imagePending'`** — "Writing your story" shows ✓, "Painting the cover" + "Recording narration" both show spinners. "Skip cover · Read now" button appears when `onSkipImage` prop is non-null.
+- **phase `'text'`** — animated orb, "Writing your story" spinner
+- **phase `'imagePending'`** — compact star, "Writing your story" shows ✓, per-page grid with img + aud pips per page, "🔊 Recording narration" spinner row
+- **phase `'audio'`** — same as `'imagePending'` but audio row is highlighted (text colour instead of muted); emitted by `weaveStory` after `Promise.allSettled(imagePromises)` resolves
 - **Cancel** button always visible
-- Elapsed time counter (shown after 2s)
+- Elapsed time counter (always visible, no delay gate)
+- **"Read now (some pages may be missing audio)"** early-exit button — shown during `imagePending` or `audio` phase; clicking aborts in-flight calls, marks `readNowRef`, navigates if story already saved (audio phase), or lets `onWeave` navigate when it saves the partial story (imagePending phase)
 - Error state auto-dismisses after 4s and navigates back to `/create`
 
-`getState(key)` in `Weaving` maps phase string → per-row state (`'done'`, `'active'`, `'pending'`) with special logic for parallel phases.
+**Navigation is blocked until ALL audio settles** (or user clicks "Read now"). `onWeave` in `app.jsx` awaits `assetsPromise` before calling `navigate('/story/' + id)`.
 
-Race conditions are handled via `ignoreWeaveRef` (a `useRef`): set to `true` on cancel or skip before any async continuation checks it. `onSkipImage` calls `abortRef.current.abort()` to immediately cancel image + audio in-flight.
+Race conditions are handled via:
+- `ignoreWeaveRef` (`useRef`) — set to `true` on cancel or "Read now" (audio phase); prevents double-navigation
+- `readNowRef` (`useRef`) — set to `true` on "Read now"; causes `onWeave` to navigate immediately after `itemPut` (imagePending path)
+- `weavingStoryIdRef` (`useRef`) — holds the saved story's id once `itemPut` completes; used by "Read now" to navigate directly
 
 ## Toast Notifications
 

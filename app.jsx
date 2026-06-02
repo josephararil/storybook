@@ -78,7 +78,7 @@ function StoryWeaverApp() {
   // ─── Lifted Creator form state ────────────────────────────
   const [context,    setContext]    = React.useState('');
   const [vocab,      setVocab]      = React.useState([]);
-  const [length,     setLength]     = React.useState(4);
+  const [pages,      setPages]      = React.useState(6);
   const [tone,       setTone]       = React.useState('Gentle');
   const [storyStyle, setStoryStyle] = React.useState('prose');
   const [character,  setCharacter]  = React.useState('');
@@ -94,6 +94,8 @@ function StoryWeaverApp() {
   const [toasts,          setToasts]          = React.useState([]);
   const abortRef         = React.useRef(null);
   const ignoreWeaveRef   = React.useRef(false);
+  const readNowRef       = React.useRef(false);
+  const weavingStoryIdRef = React.useRef(null);
 
   const dismissWelcome = () => {
     localStorage.setItem('sw_welcome_seen', '1');
@@ -137,6 +139,8 @@ function StoryWeaverApp() {
   const onWeave = async (form) => {
     if (!window.SW.hasApiKey()) { setKeyModalOpen(true); return; }
     ignoreWeaveRef.current = false;
+    readNowRef.current = false;
+    weavingStoryIdRef.current = null;
     setWeaveError(null);
     setWeavePhase(null);
     setWeavingProgress({ total: 0, images: new Set(), audios: new Set(), retries: {} });
@@ -178,6 +182,10 @@ function StoryWeaverApp() {
             setWeavingProgress(prev => ({ ...prev, total: data?.total || 0 }));
             return;
           }
+          if (phase === 'audio') {
+            setWeavePhase('audio');
+            return;
+          }
           setWeavePhase(phase);
         }
       );
@@ -186,9 +194,14 @@ function StoryWeaverApp() {
       const { story, assetsPromise } = result;
       await window.SW.itemPut(story);
       setItems(prev => [story, ...prev]);
+      weavingStoryIdRef.current = story.id;
 
-      navigate('/story/' + story.id);
-      abortRef.current = null;
+      // User clicked "Read now" during imagePending — navigate immediately
+      if (readNowRef.current) {
+        navigate('/story/' + story.id);
+        abortRef.current = null;
+        return;
+      }
 
       // Non-blocking cover backup to Drive (page-1 image used as cover)
       if (window.SW.drive.isConnected() && story.coverImage) {
@@ -205,9 +218,11 @@ function StoryWeaverApp() {
           .catch(() => {});
       }
 
-      // Write per-page audio as it settles, then flip audioReady
+      // Wait for all audio to settle, then navigate
       if (assetsPromise) {
-        assetsPromise.then(async (audioResults) => {
+        try {
+          const audioResults = await assetsPromise;
+          if (ignoreWeaveRef.current) return;
           for (let idx = 0; idx < audioResults.length; idx++) {
             if (audioResults[idx]) {
               await window.SW.audioPutPage(story.id, idx, audioResults[idx]);
@@ -215,13 +230,22 @@ function StoryWeaverApp() {
           }
           const withAudio = Object.assign({}, story, { audioReady: true });
           await window.SW.itemPut(withAudio);
-          setItems(prev => prev.map(i => i.id === story.id ? withAudio : i));
-        }).catch((err) => {
+          if (!ignoreWeaveRef.current) {
+            setItems(prev => prev.map(i => i.id === story.id ? withAudio : i));
+            navigate('/story/' + story.id);
+          }
+        } catch (err) {
+          if (ignoreWeaveRef.current) return;
           if (err && err.name !== 'AbortError') {
             addToast(`Audio narration failed: ${err.message || 'Unknown error'}`);
           }
-        });
+          if (!ignoreWeaveRef.current) navigate('/story/' + story.id);
+        }
+      } else {
+        navigate('/story/' + story.id);
       }
+
+      abortRef.current = null;
     } catch (err) {
       if (ignoreWeaveRef.current) return;
       if (err.name === 'AbortError') { navigate('/create'); return; }
@@ -234,6 +258,7 @@ function StoryWeaverApp() {
 
   const onCancelWeave = () => {
     ignoreWeaveRef.current = true;
+    weavingStoryIdRef.current = null;
     if (abortRef.current) abortRef.current.abort();
     setWeavePhase(null);
     setWeaveError(null);
@@ -242,9 +267,16 @@ function StoryWeaverApp() {
   };
 
   const onReadReady = () => {
+    readNowRef.current = true;
     if (abortRef.current) abortRef.current.abort();
     setWeavingProgress({ total: 0, images: new Set(), audios: new Set(), retries: {} });
-    // Don't set ignoreWeaveRef — let onWeave complete normally and save with whatever images resolved
+    if (weavingStoryIdRef.current) {
+      // Story already saved — navigate immediately, prevent onWeave from navigating again
+      ignoreWeaveRef.current = true;
+      navigate('/story/' + weavingStoryIdRef.current);
+      weavingStoryIdRef.current = null;
+    }
+    // If story not saved yet (imagePending), onWeave will check readNowRef and navigate after saving
   };
 
   const onSaveLink = async (data, editingId) => {
@@ -352,7 +384,7 @@ function StoryWeaverApp() {
           <Creator t={theme} onWeave={onWeave} onAddLink={onOpenAddLink}
             context={context} setContext={setContext}
             vocab={vocab} setVocab={setVocab}
-            length={length} setLength={setLength}
+            pages={pages} setPages={setPages}
             tone={tone} setTone={setTone}
             storyStyle={storyStyle} setStoryStyle={setStoryStyle}
             character={character} setCharacter={setCharacter}
@@ -368,7 +400,7 @@ function StoryWeaverApp() {
       {openStory && (
         <Reader t={theme} story={openStory} onClose={() => navigate('/')} onRate={onRate} onDelete={onDelete} />
       )}
-      {isWeaving && <Weaving t={theme} error={weaveError} phase={weavePhase} onCancel={onCancelWeave} onReadReady={weavingProgress.images.has(0) ? onReadReady : null} weavingProgress={weavingProgress} />}
+      {isWeaving && <Weaving t={theme} error={weaveError} phase={weavePhase} onCancel={onCancelWeave} onReadReady={(weavePhase === 'imagePending' || weavePhase === 'audio') ? onReadReady : null} weavingProgress={weavingProgress} />}
 
       {welcomeOpen && (
         <WelcomeModal t={theme} onClose={dismissWelcome} onSetupGemini={onWelcomeSetupGemini} onConnectDrive={onWelcomeConnectDrive} />
@@ -386,6 +418,7 @@ function StoryWeaverApp() {
       )}
 
       <Toast toasts={toasts} onDismiss={dismissToast} />
+      <CallIndicator t={theme} />
     </div>
   );
 }
