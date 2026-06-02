@@ -56,7 +56,7 @@
       id:        _nextId++,
       kind:      kind    || 'unknown',
       model:     model   || '',
-      context:   (context || '').slice(0, 80),
+      context:   context || '',
       status:    'in_flight',
       startTime: Date.now(),
     };

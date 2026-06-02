@@ -115,9 +115,12 @@ Navigation is hash-based (`useHashRoute` in `app.jsx`):
 Per-page audio is stored in the **`audio` IndexedDB store** keyed as `${storyId}::${pageIdx}`. The database (`storyweaver`) is at **version 3** — v3 added the `events` store for the call tracker. (e.g. `my-story::0`, `my-story::1`). The legacy single-story audio key (bare `storyId`) is still used by `audioGet/audioPut/audioDelete`; per-page callers use `audioGetPage/audioPutPage/audioDeleteStory`. `audioReady: true` on the story signals all pages' audio has settled.
 
 **Out of scope (future milestones):**
-- Per-page Drive backup — only `pages[0].image` is uploaded as the story "cover" (`coverDriveId`); individual page images and audio are not backed up.
-- Single-page regeneration — there is no UI to re-generate one page's image or audio independently.
 - Per-page voice customisation — all pages use the same TTS voice; per-page overrides are not supported.
+
+**Notes on Drive backup coverage:**
+- All page images are included in `pushSync` because they are stored inline in `pages[].image` on the story object (part of the `items` IDB store).
+- All per-page audio is included in `pushSync` via the `audio` IDB store (added in sync format v2).
+- `coverDriveId` on story objects points to a separately uploaded cover file in `StoryWeaver/covers/` (legacy individual-file upload path); `pushSync`/`pullSync` is the preferred full-restore path.
 
 **Legacy AI stories** (no `version` field, had `body: string[]`) are wiped on first load via a one-time migration (`sw_v2_migrated` localStorage flag). Seeds are unaffected.
 
@@ -187,8 +190,8 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `drive.fetchAudio(fileId)` | Downloads an audio file from Drive by ID and returns it as a data URL |
 | `drive.migrateCovers(items, onProgress)` | Uploads all items that have `coverImage` but no `coverDriveId`; updates each item in IndexedDB; calls `onProgress({total,done,title})` per item |
 | `drive.getStorageInfo()` | Returns Drive quota object `{limit, usage, usageInDrive}` |
-| `drive.pushSync()` | Serializes all localStorage (excluding `sw_gemini_key`) + all IndexedDB items → creates/overwrites `storyweaver-sync.json` in the `StoryWeaver/` Drive folder |
-| `drive.pullSync()` | Downloads `storyweaver-sync.json` from Drive, restores localStorage keys and upserts IndexedDB items, then reloads the page |
+| `drive.pushSync()` | Serializes all localStorage (excluding `sw_gemini_key`) + all IndexedDB items + all audio IDB entries → creates/overwrites `storyweaver-sync.json` (v2) in the `StoryWeaver/` Drive folder. Full state — stories, page images (inline in items), and per-page audio are all included. |
+| `drive.pullSync()` | Downloads `storyweaver-sync.json` from Drive, restores localStorage keys, upserts IndexedDB items, restores all audio entries, then reloads the page. Handles both v1 (no audio) and v2 sync files. |
 
 ### Google Drive localStorage keys
 
@@ -213,7 +216,7 @@ Seeds are static and never stored in IndexedDB. Deleted seeds are tracked in `lo
 
 | Method | Description |
 |---|---|
-| `start({kind, model, context})` | Create an `in_flight` event; returns numeric `id`. `context` is truncated to 80 chars. |
+| `start({kind, model, context})` | Create an `in_flight` event; returns numeric `id`. `context` is stored in full — do not truncate before passing. |
 | `succeed(id, {durationMs})` | Mark event as `success`, persist to IDB, notify subscribers. |
 | `fail(id, {durationMs, error})` | Mark event as `error`, persist to IDB, notify subscribers. |
 | `getActive()` | Returns all `in_flight` events. |
@@ -232,9 +235,9 @@ Every Gemini fetch in `store.js` must go through the tracker:
 
 | Function | `kind` | Notes |
 |---|---|---|
-| `textCall` | `'text'` | Context = first 80 chars of `form.context` |
-| `callImageApi` (per attempt) | `'image'` | Each of the 3 retry attempts is a separate event; context prefixed `[a1]`/`[a2]`/`[a3]` |
-| `generateAudioForPage` | `'audio'` | Context = first 80 chars of `audioPrompt` text |
+| `textCall` | `'text'` | Context = full `form.context` string |
+| `callImageApi` (per attempt) | `'image'` | Each of the 3 retry attempts is a separate event; context = full prompt prefixed `[a1]`/`[a2]`/`[a3]` |
+| `generateAudioForPage` | `'audio'` | Context = full `audioPrompt` text |
 | `validateApiKey` | `'validate'` | Context = `'API key validation'` |
 
 **Rule:** Any new Gemini fetch added to `store.js` must call `SW_TRACKER.start` / `succeed` / `fail`. Drive API calls are out of scope — do not instrument them.
