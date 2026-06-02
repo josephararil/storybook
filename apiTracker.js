@@ -71,6 +71,9 @@
     ev.status     = 'success';
     ev.endTime    = Date.now();
     ev.durationMs = meta.durationMs != null ? meta.durationMs : (ev.endTime - ev.startTime);
+    if (meta.inputTokens  != null) ev.inputTokens  = meta.inputTokens;
+    if (meta.outputTokens != null) ev.outputTokens = meta.outputTokens;
+    if (meta.audioSeconds != null) ev.audioSeconds = meta.audioSeconds;
     _trim();
     _persist(ev);
     _notify();
