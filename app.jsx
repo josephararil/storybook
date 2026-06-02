@@ -418,6 +418,7 @@ function StoryWeaverApp() {
       )}
 
       <Toast toasts={toasts} onDismiss={dismissToast} />
+      <CallIndicator t={theme} />
     </div>
   );
 }

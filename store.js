@@ -16,15 +16,12 @@ let _db = null;
 function dbOpen() {
   if (_db) return Promise.resolve(_db);
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open('storyweaver', 2);
+    const req = indexedDB.open('storyweaver', 3);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
-      if (!db.objectStoreNames.contains('items')) {
-        db.createObjectStore('items', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('audio')) {
-        db.createObjectStore('audio', { keyPath: 'id' });
-      }
+      if (!db.objectStoreNames.contains('items'))  db.createObjectStore('items',  { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('audio'))  db.createObjectStore('audio',  { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('events')) db.createObjectStore('events', { keyPath: 'id' });
     };
     req.onsuccess = (e) => {
       _db = e.target.result;
@@ -181,12 +178,19 @@ function setCustomSystemPrompt(s) {
 
 
 async function validateApiKey(k) {
+  const _t0  = Date.now();
+  const _tid = window.SW_TRACKER?.start({ kind: 'validate', model: '-', context: 'API key validation' });
   try {
     const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
       headers: { 'x-goog-api-key': k },
     });
+    if (r.ok) window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
+    else       window.SW_TRACKER?.fail(_tid,    { durationMs: Date.now() - _t0, error: `HTTP ${r.status}` });
     return r.ok;
-  } catch { return false; }
+  } catch (e) {
+    window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: e.message });
+    return false;
+  }
 }
 
 // ─── Seed rating helpers ──────────────────────────────────────
@@ -448,57 +452,65 @@ function getDefaultSystemPrompt() {
 }
 
 async function textCall(form, existingIds, signal) {
-  const toneWord    = typeof form.tone === 'string' ? (form.tone.trim() || 'Gentle') : (TONE_WORDS[form.tone - 1] || 'Gentle');
-  const childName   = getChildName();
-  const targetPages = Math.min(MAX_PAGES, Math.max(MIN_PAGES, form.pages || 6));
-  const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
-  const sysPrompt   = getCustomSystemPrompt() || buildSystemPrompt(form, childName, targetPages);
+  const _t0  = Date.now();
+  const _tid = window.SW_TRACKER?.start({ kind: 'text', model: getTextModel(), context: (form.context || '').slice(0, 80) });
+  try {
+    const toneWord    = typeof form.tone === 'string' ? (form.tone.trim() || 'Gentle') : (TONE_WORDS[form.tone - 1] || 'Gentle');
+    const childName   = getChildName();
+    const targetPages = Math.min(MAX_PAGES, Math.max(MIN_PAGES, form.pages || 6));
+    const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
+    const sysPrompt   = getCustomSystemPrompt() || buildSystemPrompt(form, childName, targetPages);
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${getTextModel()}:generateContent`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
-      signal,
-      body: JSON.stringify({
-        systemInstruction: { parts: [{ text: sysPrompt }] },
-        contents: [{
-          role: 'user',
-          parts: [{ text: `Context: ${form.context}\nTone: ${toneWord}\nTarget length: ~${targetPages} pages${vocabStr}` }],
-        }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: STORY_SCHEMA,
-        },
-      }),
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${getTextModel()}:generateContent`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
+        signal,
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: sysPrompt }] },
+          contents: [{
+            role: 'user',
+            parts: [{ text: `Context: ${form.context}\nTone: ${toneWord}\nTarget length: ~${targetPages} pages${vocabStr}` }],
+          }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: STORY_SCHEMA,
+          },
+        }),
+      }
+    );
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(`API response ${res.status}: ${body?.error?.message || 'Unknown error'}`);
     }
-  );
 
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(`API response ${res.status}: ${body?.error?.message || 'Unknown error'}`);
+    const data = await res.json();
+    if (data.promptFeedback?.blockReason) {
+      throw new Error('The story was blocked — try gentler wording.');
+    }
+
+    let story;
+    try { story = JSON.parse(data.candidates[0].content.parts[0].text); }
+    catch { throw new Error('Gemini returned an unexpected response. Please try again.'); }
+
+    story.rating   = 0;
+    story.palette  = Array.isArray(story.palette) && story.palette.length >= 3
+      ? story.palette.slice(0, 3)
+      : ['#0f172a','#312e81','#fbbf24'];
+    story.scene    = VALID_SCENES.includes(story.scene)        ? story.scene    : 'moon';
+    story.category = VALID_CATEGORIES.includes(story.category) ? story.category : 'Bedtime';
+    if (!Array.isArray(story.pages)) story.pages = [];
+    if (!Array.isArray(story.vocab)) story.vocab = [];
+    story.id = uniqueId(slugify(story.title), existingIds);
+
+    window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
+    return story;
+  } catch (e) {
+    window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: e.message });
+    throw e;
   }
-
-  const data = await res.json();
-  if (data.promptFeedback?.blockReason) {
-    throw new Error('The story was blocked — try gentler wording.');
-  }
-
-  let story;
-  try { story = JSON.parse(data.candidates[0].content.parts[0].text); }
-  catch { throw new Error('Gemini returned an unexpected response. Please try again.'); }
-
-  story.rating   = 0;
-  story.palette  = Array.isArray(story.palette) && story.palette.length >= 3
-    ? story.palette.slice(0, 3)
-    : ['#0f172a','#312e81','#fbbf24'];
-  story.scene    = VALID_SCENES.includes(story.scene)        ? story.scene    : 'moon';
-  story.category = VALID_CATEGORIES.includes(story.category) ? story.category : 'Bedtime';
-  if (!Array.isArray(story.pages)) story.pages = [];
-  if (!Array.isArray(story.vocab)) story.vocab = [];
-  story.id = uniqueId(slugify(story.title), existingIds);
-
-  return story;
 }
 
 // Single image API attempt. useRefImage controls whether the reference photo is attached.
@@ -565,24 +577,58 @@ function sanitizeImagePrompt(prompt) {
 // onRetry(reason) is called before each fallback so the UI can show a status message.
 // Throws immediately on PROHIBITED_CONTENT — caller must surface this to the user.
 // Returns null if all non-prohibited attempts fail — story is still saved without a cover.
+// Each attempt is logged separately in SW_TRACKER with the attempt number in context.
 async function callImageApi(prompt, signal, onRetry) {
   if (signal?.aborted) return null;
 
   const prohibited = (e) => { if (e.message === 'PROHIBITED_CONTENT') throw new Error('Gemini rejected this prompt — please try different wording.'); };
 
   // Attempt 1: original prompt + reference image (45 s)
-  try { return await callImageApiOnce(prompt, signal, true, 45000); } catch (e) { prohibited(e); }
+  {
+    const _t0  = Date.now();
+    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: `[a1] ${prompt.slice(0, 60)}` });
+    try {
+      const r = await callImageApiOnce(prompt, signal, true, 45000);
+      window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
+      return r;
+    } catch (e) {
+      window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: e.message });
+      prohibited(e);
+    }
+  }
   if (signal?.aborted) return null;
 
   // Attempt 2: sanitized prompt + reference image (30 s)
   const safePrompt = sanitizeImagePrompt(prompt);
   onRetry?.('adjusting_prompt');
-  try { return await callImageApiOnce(safePrompt, signal, true, 30000); } catch (e) { prohibited(e); }
+  {
+    const _t0  = Date.now();
+    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: `[a2] ${safePrompt.slice(0, 60)}` });
+    try {
+      const r = await callImageApiOnce(safePrompt, signal, true, 30000);
+      window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
+      return r;
+    } catch (e) {
+      window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: e.message });
+      prohibited(e);
+    }
+  }
   if (signal?.aborted) return null;
 
   // Attempt 3: sanitized prompt, no reference image (30 s)
   onRetry?.('no_reference');
-  try { return await callImageApiOnce(safePrompt, signal, false, 30000); } catch (e) { prohibited(e); }
+  {
+    const _t0  = Date.now();
+    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: `[a3] ${safePrompt.slice(0, 60)}` });
+    try {
+      const r = await callImageApiOnce(safePrompt, signal, false, 30000);
+      window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
+      return r;
+    } catch (e) {
+      window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: e.message });
+      prohibited(e);
+    }
+  }
   return null;
 }
 
@@ -600,6 +646,9 @@ async function generateLinkCover(description, signal) {
 // Returns a WAV data URL, or null if unavailable / aborted.
 async function generateAudioForPage(text, signal) {
   if (signal?.aborted) return null;
+
+  const _t0  = Date.now();
+  const _tid = window.SW_TRACKER?.start({ kind: 'audio', model: getAudioModel(), context: text.slice(0, 80) });
 
   const ctrl    = new AbortController();
   const timerId = setTimeout(() => ctrl.abort(), 60000);
@@ -648,7 +697,10 @@ async function generateAudioForPage(text, signal) {
       }
     }
 
-    if (!pcmParts.length) return null;
+    if (!pcmParts.length) {
+      window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: 'No audio data returned' });
+      return null;
+    }
 
     const decoded = pcmParts.map(b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
     const totalLen = decoded.reduce((n, a) => n + a.length, 0);
@@ -658,9 +710,12 @@ async function generateAudioForPage(text, signal) {
 
     const wavBuf    = pcmToWav(combined, 24000, 1, 16);
     const wavBase64 = uint8ArrayToBase64(new Uint8Array(wavBuf));
+    window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
     return `data:audio/wav;base64,${wavBase64}`;
   } catch (e) {
+    const errMsg = e.name === 'AbortError' ? 'Cancelled' : e.message;
     if (e.name !== 'AbortError') console.warn('TTS generation failed:', e.message);
+    window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: errMsg });
     return null;
   } finally {
     clearTimeout(timerId);

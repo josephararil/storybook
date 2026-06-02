@@ -667,6 +667,45 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
     if (photoInputRef.current) photoInputRef.current.value = '';
   };
 
+  // ── Event Log ──────────────────────────────────────
+  const [logOpen,   setLogOpen]   = useState(false);
+  const [logEvents, setLogEvents] = useState(() => window.SW_TRACKER?.getAll(200) || []);
+
+  useEffect(() => {
+    if (!window.SW_TRACKER) return;
+    // Refresh on open; subscribe while open so new events appear live.
+    setLogEvents(window.SW_TRACKER.getAll(200));
+    if (!logOpen) return;
+    const unsub = window.SW_TRACKER.subscribe(() => setLogEvents(window.SW_TRACKER.getAll(200)));
+    return unsub;
+  }, [logOpen]);
+
+  const finishedEvents = logEvents.filter(e => e.status !== 'in_flight')
+    .sort((a, b) => b.startTime - a.startTime);
+
+  const dayGroups = (() => {
+    const map = new Map();
+    for (const ev of finishedEvents) {
+      const key = new Date(ev.startTime).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(ev);
+    }
+    return Array.from(map.entries());
+  })();
+
+  const handleCopyLog = () => {
+    const payload = JSON.stringify(finishedEvents, null, 2);
+    navigator.clipboard?.writeText(payload).catch(() => {});
+  };
+
+  const handleClearLog = () => {
+    window.SW_TRACKER?.clearLog();
+    setLogEvents([]);
+  };
+
+  const fmtDur = (ms) => ms == null ? '' : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+  const fmtTime = (ts) => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
   const rows = [
     { icon: 'wand', title: 'Gemini AI', detail: apiConfigured ? 'Configured' : 'Not set', onClick: onOpenKeyModal },
   ];
@@ -879,6 +918,112 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
               </div>
             )}
           </>
+        )}
+      </div>
+
+      {/* Event Log */}
+      <div style={{
+        background: t.glass, border: `1px solid ${t.glassBorder}`,
+        backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+        borderRadius: 22, marginBottom: 18, overflow: 'hidden',
+      }}>
+        {/* Collapsible header */}
+        <div
+          onClick={() => setLogOpen(o => !o)}
+          style={{ display: 'flex', alignItems: 'center', padding: '14px 16px', gap: 14, cursor: 'pointer' }}
+        >
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: t.accentSoft, color: t.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Icon name="eye" size={18} stroke={2} />
+          </div>
+          <div style={{ flex: 1, fontFamily: t.fontBody, fontWeight: 600, fontSize: 15 }}>Event Log</div>
+          <div style={{ color: t.textMuted, fontFamily: t.fontBody, fontSize: 13, fontWeight: 500, marginRight: 4 }}>
+            {finishedEvents.length > 0 ? `${finishedEvents.length} event${finishedEvents.length !== 1 ? 's' : ''}` : 'Empty'}
+          </div>
+          <div style={{ color: t.textMuted, fontSize: 11, transform: logOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .2s' }}>▶</div>
+        </div>
+
+        {logOpen && (
+          <div style={{ borderTop: `1px solid ${t.glassBorder}`, padding: '12px 14px 14px' }}>
+            {/* Toolbar */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <button
+                onClick={handleCopyLog}
+                disabled={finishedEvents.length === 0}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: 10,
+                  background: t.accentSoft, border: `1px solid ${t.accent}44`,
+                  color: t.accent, fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+                  cursor: finishedEvents.length === 0 ? 'default' : 'pointer',
+                  opacity: finishedEvents.length === 0 ? 0.4 : 1,
+                }}
+              >
+                Copy log
+              </button>
+              <button
+                onClick={handleClearLog}
+                disabled={finishedEvents.length === 0}
+                style={{
+                  flex: 1, padding: '8px 0', borderRadius: 10,
+                  background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.25)',
+                  color: '#f87171', fontFamily: t.fontBody, fontWeight: 700, fontSize: 12,
+                  cursor: finishedEvents.length === 0 ? 'default' : 'pointer',
+                  opacity: finishedEvents.length === 0 ? 0.4 : 1,
+                }}
+              >
+                Clear log
+              </button>
+            </div>
+
+            {/* Day-grouped events */}
+            {dayGroups.length === 0 ? (
+              <div style={{ textAlign: 'center', color: t.textMuted, fontFamily: t.fontBody, fontSize: 13, padding: '16px 0' }}>
+                No events recorded yet
+              </div>
+            ) : (
+              dayGroups.map(([day, evs]) => (
+                <div key={day} style={{ marginBottom: 12 }}>
+                  <div style={{ fontFamily: t.fontBody, fontWeight: 700, fontSize: 10, letterSpacing: 1.4, textTransform: 'uppercase', color: t.textMuted, marginBottom: 6 }}>
+                    {day}
+                  </div>
+                  {evs.map(ev => (
+                    <div key={ev.id} style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 8,
+                      padding: '6px 8px', borderRadius: 9, marginBottom: 3,
+                      background: ev.status === 'error' ? 'rgba(248,113,113,0.06)' : 'rgba(255,255,255,0.04)',
+                      border: `1px solid ${ev.status === 'error' ? 'rgba(248,113,113,0.15)' : 'rgba(255,255,255,0.06)'}`,
+                    }}>
+                      <span style={{ fontSize: 13, lineHeight: '18px', flexShrink: 0 }}>
+                        {ev.status === 'success' ? '✓' : '✗'}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                          <span style={{
+                            fontFamily: t.fontBody, fontWeight: 700, fontSize: 11,
+                            color: ev.status === 'success' ? '#4ade80' : '#f87171',
+                            textTransform: 'uppercase', letterSpacing: 0.5,
+                          }}>
+                            {ev.kind}
+                          </span>
+                          <span style={{ fontFamily: t.fontBody, fontSize: 10, color: t.textMuted, flexShrink: 0 }}>
+                            {fmtTime(ev.startTime)}{ev.durationMs != null ? ` · ${fmtDur(ev.durationMs)}` : ''}
+                          </span>
+                        </div>
+                        <div style={{ fontFamily: t.fontBody, fontSize: 10, color: t.textMuted, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {ev.model}
+                          {ev.context ? ` — ${ev.context}` : ''}
+                        </div>
+                        {ev.error && (
+                          <div style={{ fontFamily: t.fontBody, fontSize: 10, color: '#f87171', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {ev.error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
         )}
       </div>
 
@@ -1394,6 +1539,13 @@ function Toast({ toasts, onDismiss }) {
 function Weaving({ t, error, phase, onCancel, onReadReady, weavingProgress }) {
   const childName = window.SW?.getChildName() || 'your child';
   const [elapsed, setElapsed] = useState(0);
+  const [activeCallCount, setActiveCallCount] = useState(() => window.SW_TRACKER?.getActive().length || 0);
+
+  useEffect(() => {
+    if (!window.SW_TRACKER) return;
+    const unsub = window.SW_TRACKER.subscribe(() => setActiveCallCount(window.SW_TRACKER.getActive().length));
+    return unsub;
+  }, []);
 
   useEffect(() => {
     if (error) return;
@@ -1570,9 +1722,14 @@ function Weaving({ t, error, phase, onCancel, onReadReady, weavingProgress }) {
           </div>
         )}
 
-        {/* Elapsed time */}
+        {/* Elapsed time + live call count */}
         <div style={{ marginTop: 8, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12, fontWeight: 500, opacity: 0.6 }}>
           {fmtElapsed(elapsed)} elapsed
+          {activeCallCount > 0 && (
+            <span style={{ marginLeft: 10, opacity: 0.85 }}>
+              · {activeCallCount} Gemini call{activeCallCount !== 1 ? 's' : ''} in flight
+            </span>
+          )}
         </div>
 
         {/* Read now early-exit — available once imagePending or audio phase */}
