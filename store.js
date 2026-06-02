@@ -12,12 +12,12 @@ const MAX_PAGES = 10;
 // inputPer1M / outputPer1M: cost per 1 million tokens. perImage: per generated image.
 // perSecond: cost per second of generated audio (24 kHz 16-bit mono PCM).
 const MODEL_PRICING = {
-  'gemini-2.5-flash':             { inputPer1M: 0.15,  outputPer1M: 0.60  },
-  'gemini-3.5-flash':             { inputPer1M: 0.15,  outputPer1M: 0.60  },
+  'gemini-2.5-flash':             { inputPer1M: 0.30,  outputPer1M: 2.50  },
+  'gemini-3.5-flash':             { inputPer1M: 1.50,  outputPer1M: 9.00  },
   'gemini-2.5-flash-image':       { perImage: 0.039 },
-  'gemini-3.1-flash-image':       { perImage: 0.039 },
-  'gemini-2.5-flash-preview-tts': { perSecond: 0.000040 },
-  'gemini-3.1-flash-tts-preview': { perSecond: 0.000040 },
+  'gemini-3.1-flash-image':       { perImage: 0.067 },
+  'gemini-2.5-flash-preview-tts': { perSecond: 0.00025 },
+  'gemini-3.1-flash-tts-preview': { perSecond: 0.0005 },
 };
 
 // Capture seeds once; stays static throughout the session
