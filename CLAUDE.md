@@ -14,6 +14,19 @@ Git is fully configured. Always make a new branch if you are in `main` before st
 
 The site is deployed via GitHub Pages from the `main` branch root. Once user accepts the PR to merge to `main`, this triggers a redeploy automatically after 60 seconds.
 
+### Vercel deployment (proxy / shareable version)
+
+The repo also includes a Vercel configuration (`vercel.json`) that enables a server-side proxy so the app can be shared without distributing an API key:
+
+- **`api/gemini.js`** — Node.js serverless function. Receives requests at `/api/gemini?path=/v1beta/...`, forwards them to Google with `x-goog-api-key: process.env.GEMINI_API_KEY`, and returns the response verbatim.
+- **`vercel.json`** — sets `maxDuration: 60` for the function (image/audio calls can take up to 45 s; Vercel Pro plan required for the full 60 s; Hobby plan enforces a 10 s limit which may cause occasional timeouts on slow image generations) and adds a catch-all rewrite so all non-`/api/` paths serve `index.html`.
+- **`GEMINI_API_KEY`** — must be set in the Vercel dashboard (Project → Settings → Environment Variables). Never committed to the repo.
+
+When deploying to Vercel:
+1. Import the GitHub repo in the Vercel dashboard.
+2. Add `GEMINI_API_KEY` as an environment variable.
+3. Deploy. The proxy is live immediately; clients default to proxy mode when they have no personal key stored.
+
 ## Running the App
 
 Open `index.html` directly in a modern browser. There is no build step, no npm install, and no dev server — Babel transpiles JSX in-browser on page load. All dependencies (React 18, ReactDOM, Babel) are loaded from unpkg CDN.
@@ -56,6 +69,8 @@ data.js → sophie.js → apiTracker.js → store.js → cover.jsx → screens.j
 | `app.jsx` | Root `StoryWeaverApp`; theme object; hash routing; lifted state; all event handlers; mounts `<CallIndicator>` |
 | `sw.js` | Service worker — network-first for app files (updates always propagate), cache-first for CDN assets (pinned versions) |
 | `manifest.webmanifest` | PWA install metadata |
+| `api/gemini.js` | Vercel serverless proxy — forwards Gemini API calls with a server-side key; see Vercel deployment section |
+| `vercel.json` | Vercel config: 60 s function timeout + catch-all rewrite for SPA routing |
 
 ## Hash Routing
 
@@ -154,6 +169,8 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `audioDeleteStory(storyId)` | Delete all `${storyId}::*` audio keys for a story (used on delete) |
 | `mergeItems(persisted)` | Merge IndexedDB items with seeds (respects deleted seeds) |
 | `getApiKey() / setApiKey(k) / hasApiKey() / validateApiKey(k)` | Gemini API key via localStorage |
+| `getUseProxy() / setUseProxy(v)` | Whether to route calls through `/api/gemini` (proxy) or directly to Google (BYOK); defaults to proxy when no personal key is stored (`sw_use_proxy` in localStorage) |
+| `isApiReady()` | Returns `true` when either proxy mode is active or a personal key is set — use instead of `hasApiKey()` to gate story generation |
 | `getTextModel() / setTextModel(m)` | Text generation model (default `gemini-3.5-flash`) via localStorage `sw_text_model` |
 | `getImageModel() / setImageModel(m)` | Image generation model (default `gemini-3.1-flash-image-preview`) via localStorage `sw_image_model` |
 | `getAudioModel() / setAudioModel(m)` | TTS model (default `gemini-3.1-flash-tts-preview`) via localStorage `sw_audio_model` |

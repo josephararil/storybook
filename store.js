@@ -159,6 +159,27 @@ function getApiKey()  { return localStorage.getItem('sw_gemini_key') || ''; }
 function setApiKey(k) { localStorage.setItem('sw_gemini_key', k); }
 function hasApiKey()  { return !!localStorage.getItem('sw_gemini_key'); }
 
+// ─── Proxy helpers ────────────────────────────────────────────
+// getUseProxy: true = route calls through /api/gemini (shared server key, no BYOK needed).
+// Defaults to proxy when the user has no personal key; can be overridden via the toggle.
+function getUseProxy() {
+  const stored = localStorage.getItem('sw_use_proxy');
+  if (stored !== null) return stored === '1';
+  return !hasApiKey();
+}
+function setUseProxy(v) {
+  localStorage.setItem('sw_use_proxy', v ? '1' : '0');
+}
+// isApiReady: true when the app can make Gemini calls (either via proxy or own key).
+function isApiReady() {
+  return getUseProxy() || hasApiKey();
+}
+// buildGeminiUrl: returns the correct URL for a Gemini API path based on current mode.
+function buildGeminiUrl(path) {
+  if (getUseProxy()) return `/api/gemini?path=${encodeURIComponent(path)}`;
+  return `https://generativelanguage.googleapis.com${path}`;
+}
+
 // ─── Model helpers ────────────────────────────────────────────
 function getTextModel()   { return localStorage.getItem('sw_text_model')  || DEFAULT_TEXT_MODEL; }
 function setTextModel(m)  { localStorage.setItem('sw_text_model', m); }
@@ -481,11 +502,13 @@ async function textCall(form, existingIds, signal) {
     const vocabStr    = (form.vocab || []).length ? `\nVocabulary: ${form.vocab.join(', ')}` : '';
     const sysPrompt   = getCustomSystemPrompt() || buildSystemPrompt(form, childName, targetPages);
 
+    const _hdrs1 = { 'Content-Type': 'application/json' };
+    if (!getUseProxy()) _hdrs1['x-goog-api-key'] = getApiKey();
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${getTextModel()}:generateContent`,
+      buildGeminiUrl(`/v1beta/models/${getTextModel()}:generateContent`),
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
+        headers: _hdrs1,
         signal,
         body: JSON.stringify({
           systemInstruction: { parts: [{ text: sysPrompt }] },
@@ -559,11 +582,13 @@ async function callImageApiOnce(prompt, signal, useRefImage, timeoutMs) {
   if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
 
   try {
+    const _hdrs2 = { 'Content-Type': 'application/json' };
+    if (!getUseProxy()) _hdrs2['x-goog-api-key'] = getApiKey();
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${getImageModel()}:generateContent`,
+      buildGeminiUrl(`/v1beta/models/${getImageModel()}:generateContent`),
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
+        headers: _hdrs2,
         signal: ctrl.signal,
         body: JSON.stringify({
           contents: [{ role: 'user', parts }],
@@ -682,11 +707,13 @@ async function generateAudioForPage(text, signal) {
   const ttsPrompt = getAudioSystemPrompt() || getDefaultAudioSystemPrompt();
 
   try {
+    const _hdrs3 = { 'Content-Type': 'application/json' };
+    if (!getUseProxy()) _hdrs3['x-goog-api-key'] = getApiKey();
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${getAudioModel()}:streamGenerateContent`,
+      buildGeminiUrl(`/v1beta/models/${getAudioModel()}:streamGenerateContent`),
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': getApiKey() },
+        headers: _hdrs3,
         signal: ctrl.signal,
         body: JSON.stringify({
           contents: [{
@@ -1102,6 +1129,7 @@ window.SW = {
   dbOpen, itemsAll, itemPut, itemDelete,
   audioGet, audioPut, audioDelete, audioGetPage, audioPutPage, audioDeleteStory,
   getApiKey, setApiKey, hasApiKey, validateApiKey,
+  getUseProxy, setUseProxy, isApiReady,
   getTextModel, setTextModel, getImageModel, setImageModel, getAudioModel, setAudioModel,
   getAudioVoice, setAudioVoice, getAudioSystemPrompt, setAudioSystemPrompt, getDefaultAudioSystemPrompt,
   getCustomSystemPrompt, setCustomSystemPrompt, getDefaultSystemPrompt,

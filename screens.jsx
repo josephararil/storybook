@@ -568,7 +568,7 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
   const [birthday,     setBirthdayLocal]  = useState(() => window.SW?.getChildBirthday() || '');
   const [sampleSet,    setSampleSet]      = useState(() => !!window.SW?.getSampleImage());
   const photoInputRef = useRef(null);
-  const apiConfigured = window.SW?.hasApiKey();
+  const apiConfigured = window.SW?.isApiReady();
 
   const [driveConnected,  setDriveConnected]  = useState(() => window.SW?.drive?.isConnected() || false);
   const [driveEmail,      setDriveEmail]      = useState(() => window.SW?.drive?.getEmail() || '');
@@ -707,7 +707,7 @@ function Settings({ t, onOpenKeyModal, onNameChange, items, onDriveMigrate }) {
   const fmtTime = (ts) => new Date(ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
   const rows = [
-    { icon: 'wand', title: 'Gemini AI', detail: apiConfigured ? 'Configured' : 'Not set', onClick: onOpenKeyModal },
+    { icon: 'wand', title: 'Gemini AI', detail: !apiConfigured ? 'Not set' : window.SW?.getUseProxy() ? 'Shared key' : 'Configured', onClick: onOpenKeyModal },
   ];
 
   return (
@@ -1945,6 +1945,7 @@ function ApiKeyModal({ t, open, onClose }) {
   const [checking,    setChecking]    = useState(false);
   const [keyError,    setKeyError]    = useState('');
   const [keySaved,    setKeySaved]    = useState(false);
+  const [useProxy,    setUseProxyLocal] = useState(() => window.SW.getUseProxy());
 
   const [textModel,   setTextModelLocal]  = useState(() => window.SW.getTextModel());
   const [imageModel,  setImageModelLocal] = useState(() => window.SW.getImageModel());
@@ -1966,8 +1967,12 @@ function ApiKeyModal({ t, open, onClose }) {
     setKeySaved(false);
     try {
       const ok = await window.SW.validateApiKey(k);
-      if (ok) { window.SW.setApiKey(k); setKeySaved(true); }
-      else    { setKeyError("That key didn't work — double-check it."); }
+      if (ok) {
+        window.SW.setApiKey(k);
+        window.SW.setUseProxy(false);
+        setUseProxyLocal(false);
+        setKeySaved(true);
+      } else { setKeyError("That key didn't work — double-check it."); }
     } catch   { setKeyError("That key didn't work — double-check it."); }
     finally   { setChecking(false); }
   };
@@ -2075,40 +2080,68 @@ function ApiKeyModal({ t, open, onClose }) {
         {/* ── API Key ── */}
         <div style={fieldBox}>
           <label style={sectionLabel}>Gemini API Key</label>
-          <div style={{ fontFamily: t.fontBody, fontSize: 13, color: t.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
-            Needed to weave AI stories. Get a free key at{' '}
-            <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"
-               style={{ color: t.accent, fontWeight: 700, textDecoration: 'none' }}>aistudio.google.com/apikey</a>
+
+          {/* Proxy / BYOK toggle */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+            {[
+              { label: 'Shared key', value: true },
+              { label: 'My own key', value: false },
+            ].map(({ label, value }) => {
+              const active = useProxy === value;
+              return (
+                <button key={label} onClick={() => { window.SW.setUseProxy(value); setUseProxyLocal(value); }} style={{
+                  flex: 1, padding: '9px 12px', borderRadius: 10, cursor: 'pointer',
+                  background: active ? t.accentSoft : 'transparent',
+                  color: active ? t.accent : t.textMuted,
+                  border: active ? `1px solid ${t.accent}44` : `1px solid ${t.glassBorder}`,
+                  fontFamily: t.fontBody, fontWeight: 700, fontSize: 13,
+                }}>{label}</button>
+              );
+            })}
           </div>
-          <input
-            type="password"
-            value={keyValue}
-            onChange={(e) => { setKeyValue(e.target.value); setKeyError(''); setKeySaved(false); }}
-            placeholder="Paste your API key…"
-            style={{ ...monoInput, marginBottom: 10 }}
-          />
-          {keyError && (
-            <div style={{ marginBottom: 8, color: '#f87171', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600 }}>{keyError}</div>
-          )}
-          {keySaved && (
-            <div style={{ marginBottom: 8, color: '#4ade80', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Icon name="check" size={14} stroke={2.5} /> Key saved
+
+          {useProxy ? (
+            <div style={{ fontFamily: t.fontBody, fontSize: 13, color: t.textMuted, lineHeight: 1.6 }}>
+              Using the app's built-in Gemini key — no personal key needed. Story generation works straight away.
             </div>
+          ) : (
+            <>
+              <div style={{ fontFamily: t.fontBody, fontSize: 13, color: t.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
+                Paste your own Gemini API key. Get a free key at{' '}
+                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer"
+                   style={{ color: t.accent, fontWeight: 700, textDecoration: 'none' }}>aistudio.google.com/apikey</a>
+              </div>
+              <input
+                type="password"
+                value={keyValue}
+                onChange={(e) => { setKeyValue(e.target.value); setKeyError(''); setKeySaved(false); }}
+                placeholder="Paste your API key…"
+                style={{ ...monoInput, marginBottom: 10 }}
+              />
+              {keyError && (
+                <div style={{ marginBottom: 8, color: '#f87171', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600 }}>{keyError}</div>
+              )}
+              {keySaved && (
+                <div style={{ marginBottom: 8, color: '#4ade80', fontFamily: t.fontBody, fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Icon name="check" size={14} stroke={2.5} /> Key saved
+                </div>
+              )}
+              <button
+                onClick={handleSaveKey}
+                disabled={checking || !keyValue.trim()}
+                style={{
+                  width: '100%', border: 'none',
+                  cursor: checking || !keyValue.trim() ? 'default' : 'pointer',
+                  padding: '13px 24px', borderRadius: 12,
+                  background: checking || !keyValue.trim()
+                    ? 'rgba(251,191,36,0.2)'
+                    : `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})`,
+                  color: checking || !keyValue.trim() ? t.textMuted : '#1a0a3e',
+                  fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
+                }}
+              >{checking ? 'Checking…' : 'Save Key'}</button>
+            </>
           )}
-          <button
-            onClick={handleSaveKey}
-            disabled={checking || !keyValue.trim()}
-            style={{
-              width: '100%', border: 'none',
-              cursor: checking || !keyValue.trim() ? 'default' : 'pointer',
-              padding: '13px 24px', borderRadius: 12,
-              background: checking || !keyValue.trim()
-                ? 'rgba(251,191,36,0.2)'
-                : `linear-gradient(135deg, ${t.accent}, ${tint(t.accent, -0.15)})`,
-              color: checking || !keyValue.trim() ? t.textMuted : '#1a0a3e',
-              fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
-            }}
-          >{checking ? 'Checking…' : 'Save Key'}</button>
         </div>
 
         {/* ── Models ── */}
@@ -2319,10 +2352,10 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
   if (!open) return null;
 
   const canSave   = isLink ? (url.trim() && title.trim()) : true;
-  const hasApiKey = window.SW?.hasApiKey();
+  const isApiReady = window.SW?.isApiReady();
 
   const handleGenerateCover = async () => {
-    if (!coverPrompt.trim() || !hasApiKey) return;
+    if (!coverPrompt.trim() || !isApiReady) return;
     setGenerating(true);
     setCoverError('');
     const ctrl = new AbortController();
@@ -2419,15 +2452,15 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
           )}
           <button
             onClick={handleGenerateCover}
-            disabled={generating || !coverPrompt.trim() || !hasApiKey}
+            disabled={generating || !coverPrompt.trim() || !isApiReady}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
               width: '100%', padding: '11px 16px', borderRadius: 12, border: 'none',
-              cursor: generating || !coverPrompt.trim() || !hasApiKey ? 'default' : 'pointer',
-              background: generating || !coverPrompt.trim() || !hasApiKey
+              cursor: generating || !coverPrompt.trim() || !isApiReady ? 'default' : 'pointer',
+              background: generating || !coverPrompt.trim() || !isApiReady
                 ? 'rgba(251,191,36,0.12)'
                 : t.accentSoft,
-              color: generating || !coverPrompt.trim() || !hasApiKey ? t.textMuted : t.accent,
+              color: generating || !coverPrompt.trim() || !isApiReady ? t.textMuted : t.accent,
               fontFamily: t.fontBody, fontWeight: 700, fontSize: 14,
               border: `1px solid ${t.accent}33`,
             }}
@@ -2445,7 +2478,7 @@ function AddLinkModal({ t, open, onClose, onSave, item }) {
               <><Icon name="image" size={15} stroke={2} /> Generate cover</>
             )}
           </button>
-          {!hasApiKey && (
+          {!isApiReady && (
             <div style={{ marginTop: 8, color: t.textMuted, fontFamily: t.fontBody, fontSize: 12 }}>
               Configure a Gemini API key in Settings to generate covers.
             </div>
