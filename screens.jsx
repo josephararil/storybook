@@ -1950,7 +1950,11 @@ function ApiKeyModal({ t, open, onClose }) {
 
   const [textModel,        setTextModelLocal]       = useState(() => window.SW.getTextModel());
   const [imageModel,       setImageModelLocal]      = useState(() => window.SW.getImageModel());
-  const [audioModel,       setAudioModelLocal]      = useState(() => window.SW.getAudioModel());
+  const AUDIO_MODEL_OPTIONS = ['gemini-2.5-flash-preview-tts', 'gemini-3.1-flash-tts-preview'];
+  const [audioModel,       setAudioModelLocal]      = useState(() => {
+    const stored = window.SW.getAudioModel();
+    return AUDIO_MODEL_OPTIONS.includes(stored) ? stored : 'gemini-2.5-flash-preview-tts';
+  });
   const [audioVoice,       setAudioVoiceLocal]      = useState(() => window.SW.getAudioVoice());
   const [audioConcurrency, setAudioConcurrencyLocal]= useState(() => window.SW.getAudioConcurrency());
 
@@ -1989,12 +1993,6 @@ function ApiKeyModal({ t, open, onClose }) {
     const val = imageModel.trim();
     if (val) window.SW.setImageModel(val);
     else     setImageModelLocal(window.SW.getImageModel());
-  };
-
-  const handleAudioModelBlur = () => {
-    const val = audioModel.trim();
-    if (val) window.SW.setAudioModel(val);
-    else     setAudioModelLocal(window.SW.getAudioModel());
   };
 
   const handleAudioVoiceBlur = () => {
@@ -2194,13 +2192,20 @@ function ApiKeyModal({ t, open, onClose }) {
 
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 6 }}>Audio narration</div>
-            <input
-              type="text"
-              value={audioModel}
-              onChange={(e) => setAudioModelLocal(e.target.value)}
-              onBlur={handleAudioModelBlur}
-              style={monoInput}
-            />
+            <div style={{ display: 'flex', gap: 6 }}>
+              {AUDIO_MODEL_OPTIONS.map(m => {
+                const active = audioModel === m;
+                return (
+                  <button key={m} onClick={() => { setAudioModelLocal(m); window.SW.setAudioModel(m); }} style={{
+                    flex: 1, padding: '9px 8px', borderRadius: 10, cursor: 'pointer',
+                    background: active ? t.accentSoft : 'transparent',
+                    color: active ? t.accent : t.textMuted,
+                    border: active ? `1px solid ${t.accent}44` : `1px solid ${t.glassBorder}`,
+                    fontFamily: 'monospace', fontWeight: 600, fontSize: 11,
+                  }}>{m}</button>
+                );
+              })}
+            </div>
           </div>
 
           <div style={{ marginBottom: 14 }}>
