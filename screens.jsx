@@ -1946,10 +1946,11 @@ function ApiKeyModal({ t, open, onClose }) {
   const [keyError,    setKeyError]    = useState('');
   const [keySaved,    setKeySaved]    = useState(false);
 
-  const [textModel,   setTextModelLocal]  = useState(() => window.SW.getTextModel());
-  const [imageModel,  setImageModelLocal] = useState(() => window.SW.getImageModel());
-  const [audioModel,  setAudioModelLocal] = useState(() => window.SW.getAudioModel());
-  const [audioVoice,  setAudioVoiceLocal] = useState(() => window.SW.getAudioVoice());
+  const [textModel,        setTextModelLocal]       = useState(() => window.SW.getTextModel());
+  const [imageModel,       setImageModelLocal]      = useState(() => window.SW.getImageModel());
+  const [audioModel,       setAudioModelLocal]      = useState(() => window.SW.getAudioModel());
+  const [audioVoice,       setAudioVoiceLocal]      = useState(() => window.SW.getAudioVoice());
+  const [audioConcurrency, setAudioConcurrencyLocal]= useState(() => window.SW.getAudioConcurrency());
 
   const [sysPrompt,      setSysPrompt]      = useState(() => window.SW.getCustomSystemPrompt());
   const [promptSaved,    setPromptSaved]    = useState(false);
@@ -2146,6 +2147,31 @@ function ApiKeyModal({ t, open, onClose }) {
               onBlur={handleAudioModelBlur}
               style={monoInput}
             />
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: t.textMuted, marginBottom: 6 }}>
+              Audio concurrency <span style={{ fontWeight: 500, opacity: 0.65 }}>— parallel narration calls</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <input
+                type="range"
+                min={1} max={4} step={1}
+                value={audioConcurrency}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setAudioConcurrencyLocal(n);
+                  window.SW.setAudioConcurrency(n);
+                }}
+                style={{ flex: 1, accentColor: t.accent, cursor: 'pointer' }}
+              />
+              <span style={{ fontFamily: t.fontBody, fontWeight: 700, fontSize: 15, color: t.accent, minWidth: 14, textAlign: 'right' }}>
+                {audioConcurrency}
+              </span>
+            </div>
+            <div style={{ fontFamily: t.fontBody, fontSize: 11, color: t.textMuted, marginTop: 4, lineHeight: 1.5 }}>
+              Lower = fewer 500 errors. Higher = faster but may overwhelm the preview model.
+            </div>
           </div>
 
           <div>

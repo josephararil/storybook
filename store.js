@@ -168,6 +168,13 @@ function getAudioModel()  { return localStorage.getItem('sw_audio_model') || DEF
 function setAudioModel(m) { localStorage.setItem('sw_audio_model', m); }
 function getAudioVoice()  { return localStorage.getItem('sw_audio_voice') || 'Zephyr'; }
 function setAudioVoice(v) { localStorage.setItem('sw_audio_voice', v); }
+function getAudioConcurrency() {
+  const v = parseInt(localStorage.getItem('sw_audio_concurrency') || '2', 10);
+  return (isNaN(v) || v < 1) ? 2 : Math.min(v, 6);
+}
+function setAudioConcurrency(n) {
+  localStorage.setItem('sw_audio_concurrency', String(Math.max(1, Math.min(6, Number(n)))));
+}
 function getAudioSystemPrompt()  { return localStorage.getItem('sw_audio_sys_prompt') || ''; }
 function setAudioSystemPrompt(s) {
   if (s) localStorage.setItem('sw_audio_sys_prompt', s);
@@ -676,7 +683,7 @@ async function generateAudioForPage(text, signal) {
   const _tid = window.SW_TRACKER?.start({ kind: 'audio', model: getAudioModel(), context: text });
 
   const ctrl    = new AbortController();
-  const timerId = setTimeout(() => ctrl.abort(), 60000);
+  const timerId = setTimeout(() => ctrl.abort(), 120000);
   if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
 
   const ttsPrompt = getAudioSystemPrompt() || getDefaultAudioSystemPrompt();
@@ -794,18 +801,48 @@ async function weaveStory(form, existingIds, signal, onProgress) {
   const pages     = textStory.pages || [];
   onProgress?.('assets', { story: textStory, total: pages.length });
 
-  // Fan out — one image + one audio per page, all start simultaneously
+  // Fan out images (still fully parallel)
   const imagePromises = pages.map((p, idx) =>
     callImageApi(p.imagePrompt, signal, (reason) => onProgress?.('imageRetry', { idx, reason }))
       .catch(() => null)
       .then(img => { onProgress?.('pageAsset', { idx, kind: 'image', ok: !!img }); return img; })
   );
 
-  const audioPromises = pages.map((p, idx) =>
-    generateAudioForPage(p.audioPrompt, signal)
-      .catch(() => null)
-      .then(aud => { onProgress?.('pageAsset', { idx, kind: 'audio', ok: !!aud }); return aud; })
-  );
+  // Audio: page 0 always first, then remaining pages with concurrency-limited workers.
+  // firstAudioPromise resolves as soon as page 0 audio settles — app.jsx uses it to navigate early.
+  let firstAudioResolve;
+  const firstAudioPromise = new Promise(r => { firstAudioResolve = r; });
+
+  const assetsPromise = (async () => {
+    if (!pages.length) { firstAudioResolve(null); return []; }
+
+    const wav0 = await generateAudioForPage(pages[0].audioPrompt, signal).catch(() => null);
+    onProgress?.('pageAsset', { idx: 0, kind: 'audio', ok: !!wav0 });
+    firstAudioResolve(wav0);
+
+    if (pages.length === 1) return [wav0];
+
+    const results = [wav0];
+    for (let i = 1; i < pages.length; i++) results.push(null);
+
+    const queue = [];
+    for (let i = 1; i < pages.length; i++) queue.push(i);
+
+    const concurrency = getAudioConcurrency();
+    const worker = async () => {
+      let idx;
+      while ((idx = queue.shift()) !== undefined) {
+        if (signal?.aborted) break;
+        const wav = await generateAudioForPage(pages[idx].audioPrompt, signal).catch(() => null);
+        onProgress?.('pageAsset', { idx, kind: 'audio', ok: !!wav });
+        results[idx] = wav;
+      }
+    };
+
+    const numWorkers = Math.min(concurrency, queue.length);
+    if (numWorkers > 0) await Promise.all(Array.from({ length: numWorkers }, () => worker()));
+    return results;
+  })();
 
   // Wait for all images to settle, then inline into pages
   const imageResults  = await Promise.allSettled(imagePromises);
@@ -825,10 +862,8 @@ async function weaveStory(form, existingIds, signal, onProgress) {
     audioReady: false,
   };
 
-  // assetsPromise resolves once all per-page audio has settled — individual entries may be null if TTS failed
-  const assetsPromise = Promise.all(audioPromises);
-
-  return { story, assetsPromise };
+  // assetsPromise resolves once all per-page audio has settled; firstAudioPromise resolves after page 0
+  return { story, assetsPromise, firstAudioPromise };
 }
 
 // ─── Google Drive integration ─────────────────────────────────
@@ -1116,7 +1151,8 @@ window.SW = {
   audioGet, audioPut, audioDelete, audioGetPage, audioPutPage, audioDeleteStory,
   getApiKey, setApiKey, hasApiKey, validateApiKey,
   getTextModel, setTextModel, getImageModel, setImageModel, getAudioModel, setAudioModel,
-  getAudioVoice, setAudioVoice, getAudioSystemPrompt, setAudioSystemPrompt, getDefaultAudioSystemPrompt,
+  getAudioVoice, setAudioVoice, getAudioConcurrency, setAudioConcurrency,
+  getAudioSystemPrompt, setAudioSystemPrompt, getDefaultAudioSystemPrompt,
   getCustomSystemPrompt, setCustomSystemPrompt, getDefaultSystemPrompt,
   getSeedRatings, saveSeedRating,
   getSeedDeletions, deleteSeed,
