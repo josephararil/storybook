@@ -94,6 +94,7 @@ class handler(BaseHTTPRequestHandler):
             url = (
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{model}:streamGenerateContent"
+                f"?key={api_key}"
             )
             payload = {
                 'contents': [{'role': 'user', 'parts': [{'text': full_text}]}],
