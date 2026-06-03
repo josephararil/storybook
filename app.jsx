@@ -152,7 +152,7 @@ function StoryWeaverApp() {
   };
 
   const onWeave = async (form) => {
-    if (!window.SW.hasApiKey()) { setKeyModalOpen(true); return; }
+    if (!window.SW.isApiReady()) { setKeyModalOpen(true); return; }
     ignoreWeaveRef.current = false;
     readNowRef.current = false;
     weavingStoryIdRef.current = null;
