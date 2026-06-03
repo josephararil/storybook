@@ -18,14 +18,23 @@ The site is deployed via GitHub Pages from the `main` branch root. Once user acc
 
 The repo also includes a Vercel configuration (`vercel.json`) that enables a server-side proxy so the app can be shared without distributing an API key:
 
-- **`api/gemini.js`** — Node.js serverless function. Receives requests at `/api/gemini?path=/v1beta/...`, forwards them to Google with `x-goog-api-key: process.env.GEMINI_API_KEY`, and returns the response verbatim.
+- **`api/gemini.js`** — Node.js serverless function. Receives requests at `https://api.josepharari.com/api/gemini?path=/v1beta/...`, forwards them to Google with `x-goog-api-key: process.env.GEMINI_API_KEY`, and returns the response verbatim. Includes CORS headers so it can be called cross-origin from the GitHub Pages front-end.
 - **`vercel.json`** — sets `maxDuration: 60` for the function (image/audio calls can take up to 45 s; Vercel Pro plan required for the full 60 s; Hobby plan enforces a 10 s limit which may cause occasional timeouts on slow image generations) and adds a catch-all rewrite so all non-`/api/` paths serve `index.html`.
 - **`GEMINI_API_KEY`** — must be set in the Vercel dashboard (Project → Settings → Environment Variables). Never committed to the repo.
 
-When deploying to Vercel:
+**Architecture:** GitHub Pages at `josepharari.com/storybook` serves the front-end. The Vercel project is used exclusively as the API host at `api.josepharari.com`. These are independent deployments — the two DNS records coexist without conflict:
+
+```
+josepharari.com        CNAME → josephararil.github.io    (GitHub Pages — all projects)
+api.josepharari.com    CNAME → cname.vercel-dns.com      (Vercel — function only)
+```
+
+When deploying / setting up for the first time:
 1. Import the GitHub repo in the Vercel dashboard.
 2. Add `GEMINI_API_KEY` as an environment variable.
-3. Deploy. The proxy is live immediately; clients default to proxy mode when they have no personal key stored.
+3. In the Vercel project: Settings → Domains → add `api.josepharari.com`.
+4. In your DNS provider: add a CNAME record `api` → `cname.vercel-dns.com`.
+5. Deploy. Clients default to proxy mode when they have no personal key stored.
 
 ## Running the App
 

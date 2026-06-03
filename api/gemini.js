@@ -10,6 +10,20 @@
 //   GEMINI_API_KEY=AIza...
 
 module.exports = async function handler(req, res) {
+  // CORS — the function lives at api.josepharari.com but the app is served
+  // from josepharari.com (GitHub Pages), so requests are cross-origin.
+  // We allow all origins here because the secret (GEMINI_API_KEY) is server-side;
+  // there is nothing in the response that should be restricted by origin.
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Browsers send an OPTIONS "preflight" before the real POST to ask
+  // "is this cross-origin request allowed?".  Reply immediately with 204.
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
   const { path } = req.query;
 
   // Safety: only allow /v1beta/ paths so this proxy can't be used for

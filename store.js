@@ -175,8 +175,10 @@ function isApiReady() {
   return getUseProxy() || hasApiKey();
 }
 // buildGeminiUrl: returns the correct URL for a Gemini API path based on current mode.
+// Always uses the absolute api.josepharari.com URL so the proxy works from any host
+// (GitHub Pages, localhost, etc.) — not just when served from Vercel itself.
 function buildGeminiUrl(path) {
-  if (getUseProxy()) return `/api/gemini?path=${encodeURIComponent(path)}`;
+  if (getUseProxy()) return `https://api.josepharari.com/api/gemini?path=${encodeURIComponent(path)}`;
   return `https://generativelanguage.googleapis.com${path}`;
 }
 
