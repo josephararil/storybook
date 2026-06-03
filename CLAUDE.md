@@ -16,25 +16,90 @@ The site is deployed via GitHub Pages from the `main` branch root. Once user acc
 
 ### Vercel deployment (proxy / shareable version)
 
-The repo also includes a Vercel configuration (`vercel.json`) that enables a server-side proxy so the app can be shared without distributing an API key:
-
-- **`api/gemini.js`** — Node.js serverless function. Receives requests at `https://api.josepharari.com/api/gemini?path=/v1beta/...`, forwards them to Google with `x-goog-api-key: process.env.GEMINI_API_KEY`, and returns the response verbatim. Includes CORS headers so it can be called cross-origin from the GitHub Pages front-end.
-- **`vercel.json`** — sets `maxDuration: 60` for the function (image/audio calls can take up to 45 s; Vercel Pro plan required for the full 60 s; Hobby plan enforces a 10 s limit which may cause occasional timeouts on slow image generations) and adds a catch-all rewrite so all non-`/api/` paths serve `index.html`.
-- **`GEMINI_API_KEY`** — must be set in the Vercel dashboard (Project → Settings → Environment Variables). Never committed to the repo.
+The repo includes a Vercel configuration (`vercel.json`) with three semantic Python API endpoints (Python 3.9, `maxDuration: 60` each). This allows the app to be shared without distributing an API key.
 
 **Architecture:** GitHub Pages at `josepharari.com/storybook` serves the front-end. The Vercel project is used exclusively as the API host at `api.josepharari.com`. These are independent deployments — the two DNS records coexist without conflict:
 
 ```
 josepharari.com        CNAME → josephararil.github.io    (GitHub Pages — all projects)
-api.josepharari.com    CNAME → cname.vercel-dns.com      (Vercel — function only)
+api.josepharari.com    CNAME → cname.vercel-dns.com      (Vercel — Python functions)
 ```
 
-When deploying / setting up for the first time:
+#### Endpoints
+
+| Method + Path | File | Description |
+|---|---|---|
+| `POST /api/v1/stories/generate` | `api/v1/stories/generate.py` | Generate story text via Gemini JSON mode |
+| `POST /api/v1/images/generate` | `api/v1/images/generate.py` | Generate a page illustration (3-attempt retry with safety fallbacks) |
+| `POST /api/v1/audio/generate` | `api/v1/audio/generate.py` | Generate TTS narration; returns WAV as base64 data URL |
+
+All functions include `Access-Control-Allow-Origin: *` and handle OPTIONS preflight so they can be called cross-origin from the GitHub Pages front-end.
+
+#### Authentication
+
+Every endpoint checks the `X-SW-Token` request header against the `SW_AUTH_TOKEN` environment variable. Missing or wrong token → `401 { "success": false, "error": "Unauthorised" }`.
+
+#### Environment variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `GEMINI_API_KEY` | Yes | — | Google Gemini API key; never committed to repo |
+| `SW_AUTH_TOKEN` | Yes | — | Shared secret for `X-SW-Token` auth |
+| `TEXT_MODEL` | No | `gemini-2.5-flash` | Text generation model |
+| `IMAGE_MODEL` | No | `gemini-2.5-flash-image` | Image generation model |
+| `AUDIO_MODEL` | No | `gemini-2.5-flash-preview-tts` | TTS model |
+
+#### API contracts
+
+**POST /api/v1/stories/generate**
+```json
+// Request body
+{
+  "context": "string — what the child did today",
+  "vocabulary": ["word1", "word2"],
+  "targetPages": 6,
+  "tone": "Gentle",
+  "storyStyle": "prose",
+  "character": "",
+  "childName": "Sophie",
+  "customSystemPrompt": ""
+}
+// Success response
+{ "success": true, "data": { "id", "title", "category", "rating", "palette", "scene", "vocab", "pages": [{ "text", "imagePrompt", "audioPrompt" }] } }
+// Error response
+{ "success": false, "error": "human-readable message" }
+```
+
+**POST /api/v1/images/generate**
+```json
+// Request body
+{
+  "prompt": "Dense scene description ~40–60 words",
+  "model": "gemini-2.5-flash-image",
+  "referenceImage": { "mimeType": "image/jpeg", "data": "<base64>" }
+}
+// model and referenceImage are optional; omitting referenceImage uses server-side sophie.jpg
+// Success response
+{ "success": true, "data": { "imageUrl": "data:image/webp;base64,..." } }
+```
+
+**POST /api/v1/audio/generate**
+```json
+// Request body
+{ "text": "Narration with [audio tags]...", "voice": "Zephyr", "model": "...", "systemPrompt": "" }
+// systemPrompt is optional; empty string uses built-in British RP bedtime narration prompt
+// Success response
+{ "success": true, "data": { "audioUrl": "data:audio/wav;base64,...", "durationSeconds": 12.5 } }
+```
+
+#### Deploying to Vercel
+
 1. Import the GitHub repo in the Vercel dashboard.
-2. Add `GEMINI_API_KEY` as an environment variable.
-3. In the Vercel project: Settings → Domains → add `api.josepharari.com`.
-4. In your DNS provider: add a CNAME record `api` → `cname.vercel-dns.com`.
-5. Deploy. Clients default to proxy mode when they have no personal key stored.
+2. In the Vercel project: Settings → Domains → add `api.josepharari.com`.
+3. In your DNS provider: add a CNAME record `api` → `cname.vercel-dns.com`.
+4. Add `GEMINI_API_KEY` and `SW_AUTH_TOKEN` as environment variables (Project → Settings → Environment Variables).
+5. Optionally set `TEXT_MODEL`, `IMAGE_MODEL`, `AUDIO_MODEL` to override model defaults.
+6. Deploy — `requirements.txt` (`requests`, `Pillow`) is installed automatically by Vercel.
 
 ## Running the App
 
@@ -55,12 +120,12 @@ This is a **zero-build-tool React app** — no bundler, no package.json, no ES m
 
 - Each `.jsx` file uses `Object.assign(window, { ComponentName })` to export
 - `index.html` loads scripts in dependency order via `<script type="text/babel">`
-- Plain `<script>` tags (no Babel) are used for `data.js`, `sophie.js`, and `apiTracker.js`
+- Plain `<script>` tags (no Babel) are used for `data.js` and `apiTracker.js`
 
 **Script load order matters:**
 
 ```
-data.js → sophie.js → apiTracker.js → store.js → cover.jsx → screens.jsx → callIndicator.jsx → app.jsx
+data.js → apiTracker.js → store.js → cover.jsx → screens.jsx → callIndicator.jsx → app.jsx
 ```
 
 ## File Responsibilities
@@ -69,7 +134,7 @@ data.js → sophie.js → apiTracker.js → store.js → cover.jsx → screens.j
 |---|---|
 | `index.html` | Entry point; CDN imports; script load order |
 | `data.js` | 8 seed stories in `window.SW_STORIES` / `window.SW_SEEDS` |
-| `sophie.js` | Hardcoded Sophie reference photo as `window.SOPHIE_IMAGE` (base64 JPEG, ~92 KB); plain `<script>`, not Babel |
+| `sophie.js` | No longer loaded — reference photo now lives server-side at `api/assets/sophie.jpg` |
 | `apiTracker.js` | Plain `<script>` (no Babel); exports `window.SW_TRACKER`; in-memory ring buffer + IDB persistence for Gemini call events |
 | `store.js` | All persistence and API logic; exports `window.SW`; IndexedDB wrapper, Gemini API calls, seed deletion, child profile, image compression, Google Drive integration |
 | `cover.jsx` | Procedural SVG story cover art; 8 scene types; 3 render modes |
@@ -78,8 +143,12 @@ data.js → sophie.js → apiTracker.js → store.js → cover.jsx → screens.j
 | `app.jsx` | Root `StoryWeaverApp`; theme object; hash routing; lifted state; all event handlers; mounts `<CallIndicator>` |
 | `sw.js` | Service worker — network-first for app files (updates always propagate), cache-first for CDN assets (pinned versions) |
 | `manifest.webmanifest` | PWA install metadata |
-| `api/gemini.js` | Vercel serverless proxy — forwards Gemini API calls with a server-side key; see Vercel deployment section |
-| `vercel.json` | Vercel config: 60 s function timeout + catch-all rewrite for SPA routing |
+| `api/assets/sophie.jpg` | Default reference photo used by the image endpoint; decoded from the former `sophie.js` |
+| `api/v1/stories/generate.py` | Python serverless function — generates story JSON from Gemini (ports `buildSystemPrompt` + `textCall`) |
+| `api/v1/images/generate.py` | Python serverless function — generates page images with 3-attempt safety retry; compresses to WebP via Pillow |
+| `api/v1/audio/generate.py` | Python serverless function — calls Gemini TTS, collects PCM chunks, returns WAV as base64 data URL |
+| `requirements.txt` | Vercel Python dependencies: `requests`, `Pillow` |
+| `vercel.json` | Vercel config: Python 3.9 runtime, 60 s timeout per function, catch-all rewrite for SPA routing |
 
 ## Hash Routing
 
