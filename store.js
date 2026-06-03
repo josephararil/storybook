@@ -170,9 +170,10 @@ function getUseProxy() {
 function setUseProxy(v) {
   localStorage.setItem('sw_use_proxy', v ? '1' : '0');
 }
-// isApiReady: true when the app can make Gemini calls (either via proxy or own key).
+// isApiReady: proxy mode requires a token; BYOK requires a personal key.
 function isApiReady() {
-  return getUseProxy() || hasApiKey();
+  if (getUseProxy()) return !!getAuthToken();
+  return hasApiKey();
 }
 // buildGeminiUrl: returns the correct URL for a Gemini API path based on current mode.
 // Always uses the absolute api.josepharari.com URL so the proxy works from any host
@@ -180,6 +181,17 @@ function isApiReady() {
 function buildGeminiUrl(path) {
   if (getUseProxy()) return `https://api.josepharari.com/api/gemini?path=${encodeURIComponent(path)}`;
   return `https://generativelanguage.googleapis.com${path}`;
+}
+
+// ─── Auth token helpers ───────────────────────────────────────
+function getAuthToken()  { return localStorage.getItem('sw_auth_token') || ''; }
+function setAuthToken(t) {
+  if (t) localStorage.setItem('sw_auth_token', t);
+  else   localStorage.removeItem('sw_auth_token');
+}
+// Headers sent with every proxy-mode API call
+function proxyHeaders() {
+  return { 'Content-Type': 'application/json', 'X-SW-Token': getAuthToken() };
 }
 
 // ─── Model helpers ────────────────────────────────────────────
@@ -505,6 +517,40 @@ async function textCall(form, existingIds, signal) {
   const _t0  = Date.now();
   const _tid = window.SW_TRACKER?.start({ kind: 'text', model: getTextModel(), context: form.context || '' });
   try {
+    if (getUseProxy()) {
+      // Proxy path: POST to the semantic Python API
+      const res = await fetch('https://api.josepharari.com/api/v1/stories/generate', {
+        method: 'POST',
+        headers: proxyHeaders(),
+        signal,
+        body: JSON.stringify({
+          context:            form.context || '',
+          vocabulary:         form.vocab || [],
+          targetPages:        Math.min(10, Math.max(4, form.pages || 6)),
+          tone:               (typeof form.tone === 'string' ? form.tone.trim() : '') || 'Gentle',
+          storyStyle:         form.storyStyle || 'prose',
+          character:          form.character || '',
+          childName:          getChildName(),
+          customSystemPrompt: getCustomSystemPrompt() || '',
+        }),
+      });
+      if (!res.ok) throw new Error('API response ' + res.status);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Story generation failed.');
+      const story = json.data;
+      story.id       = uniqueId(story.id, existingIds);
+      story.rating   = 0;
+      story.palette  = Array.isArray(story.palette) && story.palette.length >= 3
+        ? story.palette.slice(0, 3) : ['#0f172a','#312e81','#fbbf24'];
+      story.scene    = VALID_SCENES.includes(story.scene)        ? story.scene    : 'moon';
+      story.category = VALID_CATEGORIES.includes(story.category) ? story.category : 'Bedtime';
+      if (!Array.isArray(story.pages)) story.pages = [];
+      if (!Array.isArray(story.vocab)) story.vocab = [];
+      window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
+      return story;
+    }
+
+    // BYOK path
     const toneWord    = typeof form.tone === 'string' ? (form.tone.trim() || 'Gentle') : (TONE_WORDS[form.tone - 1] || 'Gentle');
     const childName   = getChildName();
     const targetPages = Math.min(MAX_PAGES, Math.max(MIN_PAGES, form.pages || 6));
@@ -632,7 +678,7 @@ function sanitizeImagePrompt(prompt) {
     .trim();
 }
 
-// Tries up to 3 times with progressively safer params.
+// Tries up to 3 times with progressively safer params (BYOK) or calls the proxy once.
 // onRetry(reason) is called before each fallback so the UI can show a status message.
 // Throws immediately on PROHIBITED_CONTENT — caller must surface this to the user.
 // Returns null if all non-prohibited attempts fail — story is still saved without a cover.
@@ -640,6 +686,46 @@ function sanitizeImagePrompt(prompt) {
 async function callImageApi(prompt, signal, onRetry) {
   if (signal?.aborted) return null;
 
+  if (getUseProxy()) {
+    const _t0  = Date.now();
+    const _tid = window.SW_TRACKER?.start({ kind: 'image', model: getImageModel(), context: prompt });
+    const ctrl    = new AbortController();
+    const timerId = setTimeout(() => ctrl.abort(), 60000);
+    if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+    let _done = false;
+    try {
+      const body = { prompt, model: getImageModel() };
+      const sampleImage = getSampleImage();
+      if (sampleImage) {
+        const m = sampleImage.match(/^data:(image\/[^;]+);base64,(.+)$/);
+        if (m) body.referenceImage = { mimeType: m[1], data: m[2] };
+      }
+      const res  = await fetch('https://api.josepharari.com/api/v1/images/generate', {
+        method: 'POST', headers: proxyHeaders(), signal: ctrl.signal, body: JSON.stringify(body),
+      });
+      const json = res.ok ? await res.json() : null;
+      if (json?.success) {
+        _done = true;
+        window.SW_TRACKER?.succeed(_tid, { durationMs: Date.now() - _t0 });
+        return json.data.imageUrl;
+      }
+      const errMsg = json?.error || 'Image generation failed';
+      _done = true;
+      window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: errMsg });
+      if (json?.error?.toLowerCase().includes('blocked')) {
+        throw new Error('Gemini rejected this prompt — please try different wording.');
+      }
+      return null;
+    } catch (e) {
+      if (!_done) window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: e.message });
+      if (e.message === 'Gemini rejected this prompt — please try different wording.') throw e;
+      return null;
+    } finally {
+      clearTimeout(timerId);
+    }
+  }
+
+  // BYOK path — three-attempt logic unchanged
   const prohibited = (e) => { if (e.message === 'PROHIBITED_CONTENT') throw new Error('Gemini rejected this prompt — please try different wording.'); };
 
   // Attempt 1: original prompt + reference image (45 s)
@@ -709,6 +795,47 @@ async function generateAudioForPage(text, signal) {
   const _t0  = Date.now();
   const _tid = window.SW_TRACKER?.start({ kind: 'audio', model: getAudioModel(), context: text });
 
+  if (getUseProxy()) {
+    const ctrl    = new AbortController();
+    const timerId = setTimeout(() => ctrl.abort(), 60000);
+    if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+    try {
+      const res = await fetch('https://api.josepharari.com/api/v1/audio/generate', {
+        method: 'POST',
+        headers: proxyHeaders(),
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          text,
+          voice:        getAudioVoice(),
+          model:        getAudioModel(),
+          systemPrompt: getAudioSystemPrompt() || '',
+        }),
+      });
+      if (!res.ok) {
+        window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: 'HTTP ' + res.status });
+        return null;
+      }
+      const json = await res.json();
+      if (!json.success) {
+        window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: json.error || 'Audio generation failed' });
+        return null;
+      }
+      window.SW_TRACKER?.succeed(_tid, {
+        durationMs:   Date.now() - _t0,
+        audioSeconds: json.data.durationSeconds || undefined,
+      });
+      return json.data.audioUrl;
+    } catch (e) {
+      const errMsg = e.name === 'AbortError' ? 'Cancelled' : e.message;
+      if (e.name !== 'AbortError') console.warn('TTS proxy failed:', e.message);
+      window.SW_TRACKER?.fail(_tid, { durationMs: Date.now() - _t0, error: errMsg });
+      return null;
+    } finally {
+      clearTimeout(timerId);
+    }
+  }
+
+  // BYOK path
   const ctrl    = new AbortController();
   const timerId = setTimeout(() => ctrl.abort(), 120000);
   if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
@@ -1174,11 +1301,30 @@ async function drivePullSync() {
   window.location.reload();
 }
 
+// ─── URL token auto-capture ───────────────────────────────────
+// If the page is opened with ?token=..., store it, enable proxy mode, and strip the param.
+(function() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get('token');
+    if (t) {
+      setAuthToken(t);
+      setUseProxy(true);
+      params.delete('token');
+      const clean = window.location.pathname
+        + (params.toString() ? '?' + params.toString() : '')
+        + window.location.hash;
+      history.replaceState(null, '', clean);
+    }
+  } catch(_) {}
+})();
+
 // ─── Export ───────────────────────────────────────────────────
 window.SW = {
   dbOpen, itemsAll, itemPut, itemDelete,
   audioGet, audioPut, audioDelete, audioGetPage, audioPutPage, audioDeleteStory,
   getApiKey, setApiKey, hasApiKey, validateApiKey,
+  getAuthToken, setAuthToken,
   getUseProxy, setUseProxy, isApiReady,
   getTextModel, setTextModel, getImageModel, setImageModel, getAudioModel, setAudioModel,
   getAudioVoice, setAudioVoice, getAudioConcurrency, setAudioConcurrency,

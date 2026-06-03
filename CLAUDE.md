@@ -250,8 +250,9 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `audioDeleteStory(storyId)` | Delete all `${storyId}::*` audio keys for a story (used on delete) |
 | `mergeItems(persisted)` | Merge IndexedDB items with seeds (respects deleted seeds) |
 | `getApiKey() / setApiKey(k) / hasApiKey() / validateApiKey(k)` | Gemini API key via localStorage |
-| `getUseProxy() / setUseProxy(v)` | Whether to route calls through `/api/gemini` (proxy) or directly to Google (BYOK); defaults to proxy when no personal key is stored (`sw_use_proxy` in localStorage) |
-| `isApiReady()` | Returns `true` when either proxy mode is active or a personal key is set — use instead of `hasApiKey()` to gate story generation |
+| `getAuthToken() / setAuthToken(t)` | Auth token for the semantic Python API (`sw_auth_token` in localStorage); cleared when `t` is falsy |
+| `getUseProxy() / setUseProxy(v)` | Whether to route calls through the semantic Python API (proxy) or directly to Google (BYOK); defaults to proxy when no personal key is stored (`sw_use_proxy` in localStorage) |
+| `isApiReady()` | Returns `true` when the app can make AI calls — proxy mode requires a non-empty auth token; BYOK requires a personal Gemini key. Use instead of `hasApiKey()` to gate story generation |
 | `getTextModel() / setTextModel(m)` | Text generation model (default `gemini-3.5-flash`) via localStorage `sw_text_model` |
 | `getImageModel() / setImageModel(m)` | Image generation model (default `gemini-3.1-flash-image-preview`) via localStorage `sw_image_model` |
 | `getAudioModel() / setAudioModel(m)` | TTS model (default `gemini-3.1-flash-tts-preview`) via localStorage `sw_audio_model` |
@@ -288,6 +289,30 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `drive.getStorageInfo()` | Returns Drive quota object `{limit, usage, usageInDrive}` |
 | `drive.pushSync()` | Serializes all localStorage (excluding `sw_gemini_key`) + all IndexedDB items + all audio IDB entries → creates/overwrites `storyweaver-sync.json` (v2) in the `StoryWeaver/` Drive folder. Full state — stories, page images (inline in items), and per-page audio are all included. |
 | `drive.pullSync()` | Downloads `storyweaver-sync.json` from Drive, restores localStorage keys, upserts IndexedDB items, restores all audio entries, then reloads the page. Handles both v1 (no audio) and v2 sync files. |
+
+### Auth Token
+
+The semantic Python API at `https://api.josepharari.com` requires an auth token on every request:
+
+- **`sw_auth_token`** — stored in localStorage by `setAuthToken(t)`; cleared when `t` is falsy
+- **`X-SW-Token`** header — sent by `proxyHeaders()` on every proxy-mode call (text, image, audio)
+- **`?token=` URL auto-capture** — if the page is opened with `?token=<value>`, `store.js` immediately stores the token, enables proxy mode, and strips the query param via `history.replaceState`. Use this to share a pre-authenticated link with users.
+
+`isApiReady()` in proxy mode returns `!!getAuthToken()` — the app gates generation behind a non-empty token rather than a Gemini key.
+
+### Proxy API Endpoints (`https://api.josepharari.com`)
+
+All three endpoints require `Content-Type: application/json` and `X-SW-Token: <token>`.
+
+| Endpoint | Role |
+|---|---|
+| `POST /api/v1/stories/generate` | Generates story text; accepts `context`, `vocabulary`, `targetPages`, `tone`, `storyStyle`, `character`, `childName`, `customSystemPrompt` |
+| `POST /api/v1/images/generate` | Generates a WebP cover image; accepts `prompt`, optional `model`, optional `referenceImage` (base64); omit `referenceImage` to let the server use its own default photo |
+| `POST /api/v1/audio/generate` | Generates a WAV narration; accepts `text`, `voice`, optional `model`, `systemPrompt` |
+
+All responses have shape `{ success: true, data: {...} }` on success or `{ success: false, error: "..." }` on failure.
+
+**BYOK note:** `pcmToWav()`, `uint8ArrayToBase64()`, `buildSystemPrompt()`, `STORY_SCHEMA`, `callImageApiOnce()`, `sanitizeImagePrompt()`, and `compressToWebp()` are all retained in `store.js` and are still used by the direct-Gemini (BYOK) code paths.
 
 ### Google Drive localStorage keys
 

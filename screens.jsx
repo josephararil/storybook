@@ -1946,6 +1946,7 @@ function ApiKeyModal({ t, open, onClose }) {
   const [keyError,    setKeyError]    = useState('');
   const [keySaved,    setKeySaved]    = useState(false);
   const [useProxy,    setUseProxyLocal] = useState(() => window.SW.getUseProxy());
+  const [authToken,   setAuthTokenLocal] = useState(() => window.SW.getAuthToken());
 
   const [textModel,        setTextModelLocal]       = useState(() => window.SW.getTextModel());
   const [imageModel,       setImageModelLocal]      = useState(() => window.SW.getImageModel());
@@ -2102,9 +2103,29 @@ function ApiKeyModal({ t, open, onClose }) {
           </div>
 
           {useProxy ? (
-            <div style={{ fontFamily: t.fontBody, fontSize: 13, color: t.textMuted, lineHeight: 1.6 }}>
-              Using the app's built-in Gemini key — no personal key needed. Story generation works straight away.
-            </div>
+            <>
+              <div style={{ fontFamily: t.fontBody, fontSize: 13, color: t.textMuted,
+                            lineHeight: 1.6, marginBottom: 14 }}>
+                Using the app's built-in Gemini key — no personal key needed.
+              </div>
+              {/* Auth token field */}
+              <div style={{ marginBottom: 4 }}>
+                <div style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600,
+                              color: t.textMuted, marginBottom: 6 }}>API Token</div>
+                <input
+                  type="password"
+                  value={authToken}
+                  onChange={(e) => { setAuthTokenLocal(e.target.value);
+                                     window.SW.setAuthToken(e.target.value); }}
+                  placeholder="Enter token…"
+                  style={{ ...monoInput, marginBottom: 6 }}
+                />
+                <div style={{ fontFamily: t.fontBody, fontSize: 12, color: t.textMuted,
+                              lineHeight: 1.5 }}>
+                  Required to generate stories. You'll receive this from the app owner.
+                </div>
+              </div>
+            </>
           ) : (
             <>
               <div style={{ fontFamily: t.fontBody, fontSize: 13, color: t.textMuted, lineHeight: 1.5, marginBottom: 12 }}>
