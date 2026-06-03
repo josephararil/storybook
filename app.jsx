@@ -92,10 +92,24 @@ function StoryWeaverApp() {
   const [weavePhase,      setWeavePhase]      = React.useState(null);
   const [weavingProgress, setWeavingProgress] = React.useState({ total: 0, images: new Set(), audios: new Set(), retries: {} });
   const [toasts,          setToasts]          = React.useState([]);
-  const abortRef         = React.useRef(null);
-  const ignoreWeaveRef   = React.useRef(false);
-  const readNowRef       = React.useRef(false);
+  const abortRef          = React.useRef(null);
+  const ignoreWeaveRef    = React.useRef(false);
+  const readNowRef        = React.useRef(false);
   const weavingStoryIdRef = React.useRef(null);
+  const audioInFlightRef  = React.useRef(false);
+  const weavingActiveRef  = React.useRef(false);
+
+  // Warn before unload while weaving or background audio is still writing
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (weavingActiveRef.current || audioInFlightRef.current) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, []);
 
   const dismissWelcome = () => {
     localStorage.setItem('sw_welcome_seen', '1');
@@ -121,6 +135,7 @@ function StoryWeaverApp() {
     ? items.find(s => s.type !== 'link' && s.id === storyMatch[1])
     : null;
   const isWeaving = route === '/weaving';
+  weavingActiveRef.current = isWeaving;
 
   React.useEffect(() => {
     const m = document.querySelector('meta[name="theme-color"]');
@@ -191,7 +206,7 @@ function StoryWeaverApp() {
       );
       if (ignoreWeaveRef.current) return;
 
-      const { story, assetsPromise } = result;
+      const { story, assetsPromise, firstAudioPromise } = result;
       await window.SW.itemPut(story);
       setItems(prev => [story, ...prev]);
       weavingStoryIdRef.current = story.id;
@@ -218,31 +233,44 @@ function StoryWeaverApp() {
           .catch(() => {});
       }
 
-      // Wait for all audio to settle, then navigate
-      if (assetsPromise) {
-        try {
-          const audioResults = await assetsPromise;
-          if (ignoreWeaveRef.current) return;
-          for (let idx = 0; idx < audioResults.length; idx++) {
-            if (audioResults[idx]) {
-              await window.SW.audioPutPage(story.id, idx, audioResults[idx]);
-            }
-          }
-          const withAudio = Object.assign({}, story, { audioReady: true });
-          await window.SW.itemPut(withAudio);
-          if (!ignoreWeaveRef.current) {
-            setItems(prev => prev.map(i => i.id === story.id ? withAudio : i));
-            navigate('/story/' + story.id);
-          }
-        } catch (err) {
-          if (ignoreWeaveRef.current) return;
-          if (err && err.name !== 'AbortError') {
-            addToast(`Audio narration failed: ${err.message || 'Unknown error'}`);
-          }
-          if (!ignoreWeaveRef.current) navigate('/story/' + story.id);
+      // Navigate as soon as page 0 audio resolves; save remaining audio in background
+      try {
+        const firstWav = await firstAudioPromise;
+        if (ignoreWeaveRef.current) return;
+
+        if (firstWav) {
+          await window.SW.audioPutPage(story.id, 0, firstWav);
         }
-      } else {
+
         navigate('/story/' + story.id);
+
+        // Write pages 1..N audio and mark story complete in the background
+        if (assetsPromise) {
+          audioInFlightRef.current = true;
+          assetsPromise
+            .then(async (audioResults) => {
+              for (let idx = 1; idx < audioResults.length; idx++) {
+                if (audioResults[idx]) {
+                  await window.SW.audioPutPage(story.id, idx, audioResults[idx]);
+                }
+              }
+              const withAudio = Object.assign({}, story, { audioReady: true });
+              await window.SW.itemPut(withAudio);
+              setItems(prev => prev.map(i => i.id === story.id ? withAudio : i));
+            })
+            .catch((err) => {
+              if (err && err.name !== 'AbortError') {
+                addToast(`Some audio narration failed: ${err.message || 'Unknown error'}`);
+              }
+            })
+            .finally(() => { audioInFlightRef.current = false; });
+        }
+      } catch (err) {
+        if (ignoreWeaveRef.current) return;
+        if (err && err.name !== 'AbortError') {
+          addToast(`Audio narration failed: ${err.message || 'Unknown error'}`);
+        }
+        if (!ignoreWeaveRef.current) navigate('/story/' + story.id);
       }
 
       abortRef.current = null;

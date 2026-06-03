@@ -158,6 +158,7 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `getImageModel() / setImageModel(m)` | Image generation model (default `gemini-3.1-flash-image-preview`) via localStorage `sw_image_model` |
 | `getAudioModel() / setAudioModel(m)` | TTS model (default `gemini-3.1-flash-tts-preview`) via localStorage `sw_audio_model` |
 | `getAudioVoice() / setAudioVoice(v)` | TTS voice name (default `'Aoede'`) via localStorage `sw_audio_voice` |
+| `getAudioConcurrency() / setAudioConcurrency(n)` | Max parallel audio calls for pages 1..N (default `2`, range 1–6) via localStorage `sw_audio_concurrency` |
 | `getAudioSystemPrompt() / setAudioSystemPrompt(s)` | TTS narration instructions override via localStorage `sw_audio_sys_prompt`; empty uses built-in |
 | `getDefaultAudioSystemPrompt()` | Returns the built-in TTS narration prompt |
 | `getCustomSystemPrompt() / setCustomSystemPrompt(s)` | Custom story system prompt override via localStorage `sw_system_prompt`; empty string clears (uses built-in) |
@@ -171,8 +172,8 @@ Note: `scene` and `palette` are no longer written by the modal on new items. Exi
 | `getSeedDeletions()` | Return array of deleted seed IDs |
 | `uniqueId(base, existingIds)` | Generate a unique kebab-case ID |
 | `slugify(title)` | Convert title to kebab-case |
-| `weaveStory(form, existingIds, signal, onProgress)` | Fans out per-page image + audio generation in parallel after text resolves. Returns `{ story, assetsPromise }` — `story` has `pages[]` with images inlined and `coverImage = pages[0].image`; `assetsPromise` resolves to `audioResults[]` when all page audio settles. Emits phases: `'text'`, `'assets'`, `'pageAsset'`, `'imageRetry'`, `'audio'`. |
-| `generateAudioForPage(text, signal)` | Calls Gemini TTS for a single page's `audioPrompt` string; 60 s timeout; returns a WAV data URL or null. |
+| `weaveStory(form, existingIds, signal, onProgress)` | Images fan out in parallel; audio is serialized — page 0 first, then remaining pages with concurrency limited by `getAudioConcurrency()`. Returns `{ story, assetsPromise, firstAudioPromise }` — `story` has images inlined; `firstAudioPromise` resolves with page 0 WAV (or null) as soon as page 0 audio settles; `assetsPromise` resolves to `audioResults[]` when all page audio settles. Emits phases: `'text'`, `'assets'`, `'pageAsset'`, `'imageRetry'`, `'audio'`. |
+| `generateAudioForPage(text, signal)` | Calls Gemini TTS for a single page's `audioPrompt` string; 120 s timeout; returns a WAV data URL or null. |
 | `generateLinkCover(description, signal)` | Generate a cover image for a linked storybook; `description` is a free-text prompt about the book; returns a WebP data URL or throws |
 | `regeneratePageImage(storyId, pageIdx, signal)` | Re-run `callImageApi` for one page's `imagePrompt`; updates `pages[pageIdx].image` (and `coverImage` if `pageIdx === 0`) in IDB; returns the new data URL or null on failure |
 | `regeneratePageAudio(storyId, pageIdx, signal)` | Re-run `generateAudioForPage` for one page's `audioPrompt`; writes via `audioPutPage`; bumps `story.audioReady = true` in IDB if all pages now have audio; returns the WAV data URL or null |
@@ -278,17 +279,16 @@ Do not inline this logic into callers; add new image call sites by calling `call
 
 ### Story Generation Flow (`weaveStory`)
 
-Generation fans out per-page in parallel after text resolves:
+Images fan out in parallel; audio is serialized to avoid overwhelming the preview model's concurrency limits:
 
 1. **`onProgress('text', null)`** — text call starting (spinner shown)
-2. **`textCall` resolves** → `onProgress('assets', { story, total: N })` — N image + N audio calls start simultaneously
-3. **Per-page fan-out** — for each page `idx`:
-   - `callImageApi(page.imagePrompt, signal, reason => onProgress('imageRetry', { idx, reason }))`
-   - `generateAudioForPage(page.audioPrompt, signal)` (60 s timeout)
-   - Both emit `onProgress('pageAsset', { idx, kind: 'image'|'audio', ok })` on settle
-4. **`Promise.allSettled(imagePromises)` resolves** → `onProgress('audio', null)` fired → images inlined into `pages[].image`; `coverImage = pages[0].image`
-5. **`weaveStory` returns** `{ story, assetsPromise }` — story is fully formed with images; audio is still in flight
-6. **`onWeave` in `app.jsx`** saves the story, awaits `assetsPromise` (blocking navigation), writes per-page audio via `audioPutPage(id, idx, wav)`, sets `audioReady: true`, then navigates.
+2. **`textCall` resolves** → `onProgress('assets', { story, total: N })` — N image calls + the audio pipeline all start
+3. **Images** — all N pages fan out concurrently via `callImageApi`
+4. **Audio** — page 0 always runs first (`generateAudioForPage`, 120 s timeout); after page 0 settles, remaining pages run with at most `getAudioConcurrency()` (default 2) in parallel
+5. Each page emits `onProgress('pageAsset', { idx, kind: 'image'|'audio', ok })` when it settles
+6. **`Promise.allSettled(imagePromises)` resolves** → `onProgress('audio', null)` → images inlined into `pages[].image`; `coverImage = pages[0].image`
+7. **`weaveStory` returns** `{ story, assetsPromise, firstAudioPromise }` — story has images; `firstAudioPromise` resolves when page 0 audio is ready; `assetsPromise` resolves when all audio is done
+8. **`onWeave` in `app.jsx`** saves the story, awaits `firstAudioPromise`, writes page 0 audio, then **navigates immediately**; remaining audio (pages 1..N) saves in the background and sets `audioReady: true` when complete
 
 `onProgress` phase keys:
 - `'text'` / null — text call starting
