@@ -113,7 +113,7 @@ class handler(BaseHTTPRequestHandler):
                 url,
                 headers={'Content-Type': 'application/json', 'x-goog-api-key': api_key},
                 json=payload,
-                timeout=60,
+                timeout=180,
             )
             if not resp.ok:
                 err = resp.json().get('error', {}).get('message', 'Unknown error')
