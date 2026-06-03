@@ -1,8 +1,8 @@
 {
   "functions": {
-    "api/gemini.js": {
-      "maxDuration": 60
-    }
+    "api/v1/stories/generate.py": { "runtime": "python3.9", "maxDuration": 60 },
+    "api/v1/images/generate.py":  { "runtime": "python3.9", "maxDuration": 60 },
+    "api/v1/audio/generate.py":   { "runtime": "python3.9", "maxDuration": 60 }
   },
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
