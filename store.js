@@ -199,7 +199,11 @@ function getTextModel()   { return localStorage.getItem('sw_text_model')  || DEF
 function setTextModel(m)  { localStorage.setItem('sw_text_model', m); }
 function getImageModel()  { return localStorage.getItem('sw_image_model') || DEFAULT_IMAGE_MODEL; }
 function setImageModel(m) { localStorage.setItem('sw_image_model', m); }
-function getAudioModel()  { return localStorage.getItem('sw_audio_model') || DEFAULT_AUDIO_MODEL; }
+const VALID_AUDIO_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-3.1-flash-tts-preview'];
+function getAudioModel() {
+  const stored = localStorage.getItem('sw_audio_model');
+  return (stored && VALID_AUDIO_MODELS.includes(stored)) ? stored : DEFAULT_AUDIO_MODEL;
+}
 function setAudioModel(m) { localStorage.setItem('sw_audio_model', m); }
 function getAudioVoice()  { return localStorage.getItem('sw_audio_voice') || 'Zephyr'; }
 function setAudioVoice(v) { localStorage.setItem('sw_audio_voice', v); }
@@ -1326,7 +1330,8 @@ window.SW = {
   getApiKey, setApiKey, hasApiKey, validateApiKey,
   getAuthToken, setAuthToken,
   getUseProxy, setUseProxy, isApiReady,
-  getTextModel, setTextModel, getImageModel, setImageModel, getAudioModel, setAudioModel,
+  getTextModel, setTextModel, getImageModel, setImageModel,
+  getAudioModel, setAudioModel, getAudioModelOptions: () => VALID_AUDIO_MODELS,
   getAudioVoice, setAudioVoice, getAudioConcurrency, setAudioConcurrency,
   getAudioSystemPrompt, setAudioSystemPrompt, getDefaultAudioSystemPrompt,
   getCustomSystemPrompt, setCustomSystemPrompt, getDefaultSystemPrompt,

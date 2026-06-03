@@ -1950,11 +1950,8 @@ function ApiKeyModal({ t, open, onClose }) {
 
   const [textModel,        setTextModelLocal]       = useState(() => window.SW.getTextModel());
   const [imageModel,       setImageModelLocal]      = useState(() => window.SW.getImageModel());
-  const AUDIO_MODEL_OPTIONS = ['gemini-2.5-flash-preview-tts', 'gemini-3.1-flash-tts-preview'];
-  const [audioModel,       setAudioModelLocal]      = useState(() => {
-    const stored = window.SW.getAudioModel();
-    return AUDIO_MODEL_OPTIONS.includes(stored) ? stored : 'gemini-2.5-flash-preview-tts';
-  });
+  const AUDIO_MODEL_OPTIONS = window.SW.getAudioModelOptions();
+  const [audioModel,       setAudioModelLocal]      = useState(() => window.SW.getAudioModel());
   const [audioVoice,       setAudioVoiceLocal]      = useState(() => window.SW.getAudioVoice());
   const [audioConcurrency, setAudioConcurrencyLocal]= useState(() => window.SW.getAudioConcurrency());
 
